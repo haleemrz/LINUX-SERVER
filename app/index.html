@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HALEEM Activation Server</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-icon">🔑</span>
+        <span class="logo-text">HALEEM</span>
+      </div>
+      <div id="status-pill" class="status-pill offline">⏳ Starting</div>
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" onclick="UI.switchTab('dashboard')">📊 Dashboard</button>
+        <button class="nav-btn" onclick="UI.switchTab('licenses')">📋 Licenses</button>
+        <button class="nav-btn" onclick="UI.switchTab('create')">➕ Create Key</button>
+        <button class="nav-btn" onclick="UI.switchTab('network')">🌐 Network</button>
+        <button class="nav-btn" onclick="UI.switchTab('logs')">📜 Logs</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="footer-label">Paired Device</div>
+        <div id="paired-info" class="footer-value">None</div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Dashboard -->
+      <section id="tab-dashboard" class="tab active">
+        <h2 class="tab-title">📊 Server Dashboard</h2>
+        <div class="stats-grid">
+          <div class="stat-card bg-blue"><div class="stat-num" id="s-total">0</div><div class="stat-label">Total Keys</div></div>
+          <div class="stat-card bg-green"><div class="stat-num" id="s-activated">0</div><div class="stat-label">Activated</div></div>
+          <div class="stat-card bg-yellow"><div class="stat-num" id="s-pending">0</div><div class="stat-label">Pending</div></div>
+          <div class="stat-card bg-red"><div class="stat-num" id="s-revoked">0</div><div class="stat-label">Revoked</div></div>
+        </div>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-label">🔑 Admin Token</div>
+            <div class="info-value mono" id="v-token">—</div>
+            <button class="btn btn-sm" onclick="UI.copyToken()">📋 Copy</button>
+          </div>
+          <div class="info-card">
+            <div class="info-label">🌐 Server Port</div>
+            <div class="info-value mono" id="v-port">9847</div>
+          </div>
+          <div class="info-card" style="grid-column: 1 / -1;">
+            <div class="info-label">🌍 Global URL (Internet)</div>
+            <div class="info-value mono" id="v-tunnel" style="font-size: 13px; color: #00e676;">Connecting...</div>
+            <button class="btn btn-sm" onclick="UI.copyTunnel()">📋 Copy URL</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Licenses -->
+      <section id="tab-licenses" class="tab">
+        <h2 class="tab-title">📋 License Management</h2>
+        <div class="toolbar">
+          <input type="text" id="search-input" placeholder="🔍 Search..." oninput="UI.filterList()">
+          <select id="filter-status" onchange="UI.filterList()">
+            <option value="">All</option>
+            <option value="unused">Unused</option>
+            <option value="pending">Pending</option>
+            <option value="activated">Activated</option>
+            <option value="revoked">Revoked</option>
+          </select>
+          <button class="btn btn-sm" onclick="UI.refresh()">🔄 Refresh</button>
+          <button class="btn btn-sm" onclick="UI.exportData()" style="margin-left: 10px;">💾 Export JSON</button>
+        </div>
+        <div id="license-list" class="license-list"></div>
+      </section>
+
+      <!-- Create Key -->
+      <section id="tab-create" class="tab">
+        <h2 class="tab-title">➕ Generate License Key</h2>
+        <div class="form-card">
+          <div class="form-group"><label>Customer Name</label><input type="text" id="new-name" placeholder="اسم العميل"></div>
+          <div class="form-group"><label>Phone Number</label><input type="tel" id="new-phone" placeholder="05xxxxxxxx"></div>
+          <button class="btn btn-gold" onclick="UI.createKey()">🔑 Generate Key</button>
+          <div id="create-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- Network -->
+      <section id="tab-network" class="tab">
+        <h2 class="tab-title">🌐 Network & Access</h2>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-label">📡 Local Access (LAN)</div>
+            <div class="info-value mono" id="v-lan">—</div>
+          </div>
+          <div class="info-card">
+            <div class="info-label">🌍 Public IP (WAN)</div>
+            <div class="info-value mono" id="v-wan">Detecting...</div>
+          </div>
+        </div>
+        <div class="info-card" style="margin-top:12px">
+          <div class="info-label">📱 Port Forwarding Instructions</div>
+          <div class="instructions">
+            <p>To access from outside your network:</p>
+            <ol>
+              <li>Open your router settings (usually 192.168.1.1)</li>
+              <li>Go to <strong>Port Forwarding</strong></li>
+              <li>Add rule: External Port <strong id="pf-port">9847</strong> → Internal IP <strong id="pf-ip">—</strong> : Port <strong>9847</strong></li>
+              <li>Protocol: <strong>TCP</strong></li>
+              <li>On phone app, enter: <code id="pf-url">—</code></li>
+            </ol>
+          </div>
+        </div>
+        <div class="info-card" style="margin-top:12px">
+          <div class="info-label">🔒 Device Pairing</div>
+          <p class="form-hint">Only one Android device can control this server.</p>
+          <div id="pair-status" class="pair-status">No device paired</div>
+          <button class="btn btn-danger btn-sm" onclick="UI.unpairDevice()" id="unpair-btn" style="display:none">Unpair Device</button>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section id="tab-logs" class="tab">
+        <h2 class="tab-title">📜 Server Logs</h2>
+        <div id="log-console" class="log-console"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
