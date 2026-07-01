@@ -30,6 +30,7 @@ var SSL_DIR = path.join(DATA_DIR, 'ssl');
 var RSA_DIR = path.join(DATA_DIR, 'rsa');
 var DB_PATH = path.join(DATA_DIR, 'data', 'licenses.enc');
 var CONFIG_PATH = path.join(DATA_DIR, 'config.json');
+var AFFILIATE_DB_PATH = path.join(DATA_DIR, 'data', 'affiliates.enc');
 
 // ════════════════════════════════════════════════════════
 // CRYPTO ENGINE
@@ -40,6 +41,7 @@ var _rsaPublic = null;
 var _adminToken = '';
 var _pairedDevice = null;
 var _licenses = [];
+var _affiliateData = { affiliates: [], referrals: [] };
 var _nonces = new Map(); // nonce -> expiry timestamp
 var _rateLimits = new Map(); // ip -> { count, resetAt }
 var _startTime = Date.now();
@@ -151,6 +153,35 @@ function loadLicenses() {
 function saveLicenses() {
   var enc = encrypt(JSON.stringify(_licenses), _storageKey);
   fs.writeFileSync(DB_PATH, enc);
+}
+
+// ════════════════════════════════════════════════════════
+// AFFILIATE STORAGE (isolated from licenses)
+// ════════════════════════════════════════════════════════
+function loadAffiliates() {
+  if (!fs.existsSync(AFFILIATE_DB_PATH)) { _affiliateData = { affiliates: [], referrals: [] }; return; }
+  try {
+    var raw = fs.readFileSync(AFFILIATE_DB_PATH, 'utf8');
+    _affiliateData = JSON.parse(decrypt(raw, _storageKey));
+    if (!_affiliateData.affiliates) _affiliateData.affiliates = [];
+    if (!_affiliateData.referrals) _affiliateData.referrals = [];
+  } catch (e) {
+    _affiliateData = { affiliates: [], referrals: [] };
+    log('AFFILIATE_DB_LOAD_ERROR', { error: e.message });
+  }
+}
+
+function saveAffiliates() {
+  var enc = encrypt(JSON.stringify(_affiliateData), _storageKey);
+  fs.writeFileSync(AFFILIATE_DB_PATH, enc);
+}
+
+function generateAffiliateCode() {
+  return 'AFF-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
+function generateReferralId() {
+  return 'ref_' + crypto.randomBytes(6).toString('hex');
 }
 
 // ════════════════════════════════════════════════════════
@@ -570,6 +601,204 @@ function handleUnpairDevice(req, res, ip, bodyStr) {
 }
 
 // ════════════════════════════════════════════════════════
+// AFFILIATE HANDLERS (isolated module)
+// ════════════════════════════════════════════════════════
+function parseQueryParams(urlStr) {
+  var q = {};
+  var idx = urlStr.indexOf('?');
+  if (idx < 0) return q;
+  urlStr.substring(idx + 1).split('&').forEach(function (p) {
+    var kv = p.split('=');
+    if (kv[0]) q[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+  });
+  return q;
+}
+
+function handleAffiliateList(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var list = _affiliateData.affiliates.map(function (a) {
+    var refs = _affiliateData.referrals.filter(function (r) { return r.affiliate_user_key === a.user_key; });
+    var pending = 0, paid = 0;
+    refs.forEach(function (r) {
+      if (r.status === 'paid') paid += r.commission;
+      else pending += r.commission;
+    });
+    var lic = _licenses.find(function (l) { return l.key === a.user_key; });
+    return {
+      user_key: a.user_key,
+      customer_name: lic ? lic.customer_name : '',
+      phone: lic ? lic.phone : '',
+      affiliate_code: a.affiliate_code,
+      commission_pct: a.commission_pct,
+      status: a.status,
+      total_referrals: refs.length,
+      pending_balance: pending,
+      paid_balance: paid,
+      created_at: a.created_at
+    };
+  });
+  sendJSON(res, 200, { affiliates: list });
+}
+
+function handleAffiliateEnable(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.key) { sendJSON(res, 400, { error: 'Missing key' }); return; }
+
+  var lic = _licenses.find(function (l) { return l.key === body.key; });
+  if (!lic) { sendJSON(res, 404, { error: 'License key not found' }); return; }
+
+  var existing = _affiliateData.affiliates.find(function (a) { return a.user_key === body.key; });
+  if (existing) {
+    existing.status = 'enabled';
+    if (body.commission_pct !== undefined) existing.commission_pct = parseFloat(body.commission_pct) || 20;
+  } else {
+    var code;
+    var existingCodes = new Set(_affiliateData.affiliates.map(function (a) { return a.affiliate_code; }));
+    do { code = generateAffiliateCode(); } while (existingCodes.has(code));
+    _affiliateData.affiliates.push({
+      user_key: body.key,
+      affiliate_code: code,
+      commission_pct: parseFloat(body.commission_pct) || 20,
+      status: 'enabled',
+      created_at: new Date().toISOString()
+    });
+  }
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('AFFILIATE_ENABLED', { key: body.key, ip: ip });
+  sendJSON(res, 200, { message: 'Affiliate enabled', key: body.key });
+}
+
+function handleAffiliateDisable(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.key) { sendJSON(res, 400, { error: 'Missing key' }); return; }
+
+  var aff = _affiliateData.affiliates.find(function (a) { return a.user_key === body.key; });
+  if (!aff) { sendJSON(res, 404, { error: 'Affiliate not found' }); return; }
+
+  aff.status = 'disabled';
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('AFFILIATE_DISABLED', { key: body.key, ip: ip });
+  sendJSON(res, 200, { message: 'Affiliate disabled', key: body.key });
+}
+
+function handleAffiliateDashboard(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var params = parseQueryParams(req.url);
+  var key = params.key;
+  if (!key) { sendJSON(res, 400, { error: 'Missing key parameter' }); return; }
+
+  var aff = _affiliateData.affiliates.find(function (a) { return a.user_key === key; });
+  if (!aff) { sendJSON(res, 404, { error: 'Affiliate not found' }); return; }
+
+  var refs = _affiliateData.referrals.filter(function (r) { return r.affiliate_user_key === key; });
+  var pending = 0, paid = 0;
+  refs.forEach(function (r) {
+    if (r.status === 'paid') paid += r.commission;
+    else pending += r.commission;
+  });
+
+  sendJSON(res, 200, {
+    affiliate_code: aff.affiliate_code,
+    referral_link: (tunnelUrl || 'https://haleem.app') + '/ref/' + aff.affiliate_code,
+    pending_balance: pending,
+    paid_balance: paid,
+    total_referrals: refs.length,
+    commission_pct: aff.commission_pct,
+    status: aff.status
+  });
+}
+
+function handleAffiliateReferrals(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var params = parseQueryParams(req.url);
+  var key = params.key;
+  if (!key) { sendJSON(res, 400, { error: 'Missing key parameter' }); return; }
+
+  var refs = _affiliateData.referrals.filter(function (r) { return r.affiliate_user_key === key; });
+  var enriched = refs.map(function (r) {
+    var refLic = _licenses.find(function (l) { return l.key === r.referred_user_key; });
+    return {
+      id: r.id,
+      referred_customer: refLic ? refLic.customer_name : r.referred_user_key,
+      referred_key: r.referred_user_key,
+      order_id: r.order_id,
+      commission: r.commission,
+      status: r.status,
+      created_at: r.created_at
+    };
+  });
+  sendJSON(res, 200, { referrals: enriched });
+}
+
+function handleAffiliateMarkPaid(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.id) { sendJSON(res, 400, { error: 'Missing referral id' }); return; }
+
+  var ref = _affiliateData.referrals.find(function (r) { return r.id === body.id; });
+  if (!ref) { sendJSON(res, 404, { error: 'Referral not found' }); return; }
+
+  ref.status = 'paid';
+  ref.paid_at = new Date().toISOString();
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('REFERRAL_PAID', { id: body.id, ip: ip });
+  sendJSON(res, 200, { message: 'Marked as paid', id: body.id });
+}
+
+function handleAffiliateRegisterReferral(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.affiliate_key || !body.referred_key) {
+    sendJSON(res, 400, { error: 'Missing affiliate_key or referred_key' });
+    return;
+  }
+
+  var aff = _affiliateData.affiliates.find(function (a) { return a.user_key === body.affiliate_key && a.status === 'enabled'; });
+  if (!aff) { sendJSON(res, 404, { error: 'Active affiliate not found' }); return; }
+
+  var orderValue = parseFloat(body.order_value) || 0;
+  var commission = orderValue * (aff.commission_pct / 100);
+
+  var referral = {
+    id: generateReferralId(),
+    affiliate_user_key: body.affiliate_key,
+    referred_user_key: body.referred_key,
+    order_id: body.order_id || '',
+    commission: commission,
+    status: body.status || 'pending',
+    created_at: new Date().toISOString()
+  };
+  _affiliateData.referrals.push(referral);
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('REFERRAL_REGISTERED', { affiliate: body.affiliate_key, referred: body.referred_key, commission: commission });
+  sendJSON(res, 200, { message: 'Referral registered', referral: referral });
+}
+
+// ════════════════════════════════════════════════════════
 // ROUTER
 // ════════════════════════════════════════════════════════
 function handleRequest(req, res) {
@@ -756,6 +985,15 @@ function handleRequest(req, res) {
       return;
     }
 
+    // ═══ AFFILIATE API (isolated module) ═══════════════════
+    if (method === 'GET' && url === '/api/affiliate/list') return handleAffiliateList(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/affiliate/enable') return handleAffiliateEnable(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/affiliate/disable') return handleAffiliateDisable(req, res, ip, bodyStr);
+    if (method === 'GET' && url.indexOf('/api/affiliate/dashboard') === 0) return handleAffiliateDashboard(req, res, ip, bodyStr);
+    if (method === 'GET' && url.indexOf('/api/affiliate/referrals') === 0) return handleAffiliateReferrals(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/affiliate/mark-paid') return handleAffiliateMarkPaid(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/affiliate/register-referral') return handleAffiliateRegisterReferral(req, res, ip, bodyStr);
+
     sendJSON(res, 403, { error: 'Forbidden' });
   });
 }
@@ -768,6 +1006,7 @@ function start(sslCert, sslKey) {
   loadOrCreateRSA();
   loadConfig();
   loadLicenses();
+  loadAffiliates();
 
   var httpPort = PORT + 1; // HTTP on 9848
 
@@ -814,6 +1053,58 @@ function start(sslCert, sslKey) {
           _licenses = _licenses.filter(function (l) { return l.key !== msg.key; });
           saveLicenses();
           if (process.send) process.send({ type: 'key-deleted', key: msg.key });
+          break;
+        // ═══ Affiliate IPC actions ═══════════════════════════
+        case 'get-affiliate-data':
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+          break;
+        case 'enable-affiliate':
+          var existingAff = _affiliateData.affiliates.find(function (a) { return a.user_key === msg.key; });
+          if (existingAff) {
+            existingAff.status = 'enabled';
+            if (msg.commission_pct !== undefined) existingAff.commission_pct = parseFloat(msg.commission_pct) || 20;
+          } else {
+            var affCode;
+            var affCodes = new Set(_affiliateData.affiliates.map(function (a) { return a.affiliate_code; }));
+            do { affCode = generateAffiliateCode(); } while (affCodes.has(affCode));
+            _affiliateData.affiliates.push({
+              user_key: msg.key,
+              affiliate_code: affCode,
+              commission_pct: parseFloat(msg.commission_pct) || 20,
+              status: 'enabled',
+              created_at: new Date().toISOString()
+            });
+          }
+          saveAffiliates();
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+          break;
+        case 'disable-affiliate':
+          var dAff = _affiliateData.affiliates.find(function (a) { return a.user_key === msg.key; });
+          if (dAff) { dAff.status = 'disabled'; saveAffiliates(); }
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+          break;
+        case 'mark-referral-paid':
+          var mRef = _affiliateData.referrals.find(function (r) { return r.id === msg.id; });
+          if (mRef) { mRef.status = 'paid'; mRef.paid_at = new Date().toISOString(); saveAffiliates(); }
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+          break;
+        case 'register-referral':
+          var regAff = _affiliateData.affiliates.find(function (a) { return a.user_key === msg.affiliate_key && a.status === 'enabled'; });
+          if (regAff) {
+            var ordVal = parseFloat(msg.order_value) || 0;
+            var comm = ordVal * (regAff.commission_pct / 100);
+            _affiliateData.referrals.push({
+              id: generateReferralId(),
+              affiliate_user_key: msg.affiliate_key,
+              referred_user_key: msg.referred_key,
+              order_id: msg.order_id || '',
+              commission: comm,
+              status: 'pending',
+              created_at: new Date().toISOString()
+            });
+            saveAffiliates();
+          }
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
           break;
       }
     });

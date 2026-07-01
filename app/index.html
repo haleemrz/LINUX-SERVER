@@ -22,6 +22,7 @@
         <button class="nav-btn" onclick="UI.switchTab('create')">➕ Create Key</button>
         <button class="nav-btn" onclick="UI.switchTab('network')">🌐 Network</button>
         <button class="nav-btn" onclick="UI.switchTab('logs')">📜 Logs</button>
+        <button class="nav-btn" onclick="UI.switchTab('affiliate')">🤝 Affiliate</button>
       </nav>
       <div class="sidebar-footer">
         <div class="footer-label">Paired Device</div>
@@ -126,6 +127,65 @@
       <section id="tab-logs" class="tab">
         <h2 class="tab-title">📜 Server Logs</h2>
         <div id="log-console" class="log-console"></div>
+      </section>
+
+      <!-- Affiliate -->
+      <section id="tab-affiliate" class="tab">
+        <h2 class="tab-title">🤝 Affiliate Program</h2>
+        <div class="stats-grid">
+          <div class="stat-card bg-blue"><div class="stat-num" id="aff-total">0</div><div class="stat-label">Affiliates</div></div>
+          <div class="stat-card bg-green"><div class="stat-num" id="aff-referrals">0</div><div class="stat-label">Total Referrals</div></div>
+          <div class="stat-card bg-yellow"><div class="stat-num" id="aff-pending">$0</div><div class="stat-label">Pending Payouts</div></div>
+          <div class="stat-card bg-red"><div class="stat-num" id="aff-paid">$0</div><div class="stat-label">Total Paid</div></div>
+        </div>
+
+        <!-- Enable Affiliate for Client -->
+        <div class="form-card" style="margin-top:16px">
+          <h3 style="color:var(--text1);margin:0 0 12px 0;font-size:14px">➕ Enable Affiliate for Client</h3>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="flex:1;min-width:200px;margin:0">
+              <label>License Key</label>
+              <input type="text" id="aff-enable-key" placeholder="XXXX-XXXX-XXXX-XXXX">
+            </div>
+            <div class="form-group" style="width:100px;margin:0">
+              <label>Commission %</label>
+              <input type="number" id="aff-enable-pct" value="20" min="1" max="100">
+            </div>
+            <button class="btn btn-gold btn-sm" onclick="UI.enableAffiliate()" style="height:36px">✅ Enable</button>
+          </div>
+        </div>
+
+        <!-- Affiliates List -->
+        <h3 style="color:var(--text1);margin:20px 0 8px 0;font-size:14px">📋 Active Affiliates</h3>
+        <div id="affiliate-list" class="license-list"></div>
+
+        <!-- Register Referral -->
+        <div class="form-card" style="margin-top:16px">
+          <h3 style="color:var(--text1);margin:0 0 12px 0;font-size:14px">📥 Register Referral</h3>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="flex:1;min-width:150px;margin:0">
+              <label>Affiliate Key</label>
+              <input type="text" id="ref-aff-key" placeholder="Affiliate's license key">
+            </div>
+            <div class="form-group" style="flex:1;min-width:150px;margin:0">
+              <label>Referred Key</label>
+              <input type="text" id="ref-referred-key" placeholder="New client's license key">
+            </div>
+            <div class="form-group" style="width:100px;margin:0">
+              <label>Order Value</label>
+              <input type="number" id="ref-order-value" value="100" min="0">
+            </div>
+            <div class="form-group" style="width:120px;margin:0">
+              <label>Order ID</label>
+              <input type="text" id="ref-order-id" placeholder="ORD-001">
+            </div>
+            <button class="btn btn-green btn-sm" onclick="UI.registerReferral()" style="height:36px">📥 Register</button>
+          </div>
+        </div>
+
+        <!-- Referrals Detail -->
+        <h3 style="color:var(--text1);margin:20px 0 8px 0;font-size:14px">📊 All Referrals</h3>
+        <div id="referral-list" class="license-list"></div>
       </section>
 
     </main>

@@ -247,6 +247,9 @@ function startServer() {
         case 'key-deleted':
           if (mainWindow) mainWindow.webContents.send('key-deleted', msg.key);
           break;
+        case 'affiliate-update':
+          if (mainWindow) mainWindow.webContents.send('affiliate-update', msg.data);
+          break;
       }
     });
 
@@ -477,6 +480,68 @@ function getPublicIP(cb) {
 
 ipcMain.handle('get-public-ip', function () {
   return new Promise(function (resolve) { getPublicIP(resolve); });
+});
+
+// ─── Affiliate IPC Handlers ────────────────────────────
+ipcMain.handle('get-affiliates', function () {
+  if (useBackgroundApi) {
+    return new Promise(function (resolve) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err, res) {
+        if (!err && res) { resolve(res); }
+        else { resolve({ affiliates: [] }); }
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'get-affiliate-data' });
+  }
+});
+
+ipcMain.handle('enable-affiliate', function (e, data) {
+  if (useBackgroundApi) {
+    makeAdminRequest('POST', '/api/affiliate/enable', { key: data.key, commission_pct: data.pct }, function(err, res) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err2, res2) {
+        if (!err2 && res2 && mainWindow) mainWindow.webContents.send('affiliate-update', res2);
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'enable-affiliate', key: data.key, commission_pct: data.pct });
+  }
+});
+
+ipcMain.handle('disable-affiliate', function (e, key) {
+  if (useBackgroundApi) {
+    makeAdminRequest('POST', '/api/affiliate/disable', { key: key }, function(err, res) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err2, res2) {
+        if (!err2 && res2 && mainWindow) mainWindow.webContents.send('affiliate-update', res2);
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'disable-affiliate', key: key });
+  }
+});
+
+ipcMain.handle('mark-referral-paid', function (e, id) {
+  if (useBackgroundApi) {
+    makeAdminRequest('POST', '/api/affiliate/mark-paid', { id: id }, function(err, res) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err2, res2) {
+        if (!err2 && res2 && mainWindow) mainWindow.webContents.send('affiliate-update', res2);
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'mark-referral-paid', id: id });
+  }
+});
+
+ipcMain.handle('register-referral', function (e, data) {
+  if (useBackgroundApi) {
+    makeAdminRequest('POST', '/api/affiliate/register-referral', data, function(err, res) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err2, res2) {
+        if (!err2 && res2 && mainWindow) mainWindow.webContents.send('affiliate-update', res2);
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'register-referral', affiliate_key: data.affiliate_key, referred_key: data.referred_key, order_value: data.order_value, order_id: data.order_id });
+  }
 });
 
 // ─── Window ────────────────────────────────────────────

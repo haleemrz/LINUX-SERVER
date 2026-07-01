@@ -20,5 +20,12 @@ contextBridge.exposeInMainWorld('Haleem', {
   onKeyDeleted: function (cb) { ipcRenderer.on('key-deleted', function (e, d) { cb(d); }); },
   onDevicePaired: function (cb) { ipcRenderer.on('device-paired', function (e, d) { cb(d); }); },
   onDeviceUnpaired: function (cb) { ipcRenderer.on('device-unpaired', function (e) { cb(); }); },
-  onTunnelUrl: function (cb) { ipcRenderer.on('tunnel-url', function (e, d) { cb(d); }); }
+  onTunnelUrl: function (cb) { ipcRenderer.on('tunnel-url', function (e, d) { cb(d); }); },
+  // ═══ Affiliate ═══
+  getAffiliates: function () { return ipcRenderer.invoke('get-affiliates'); },
+  enableAffiliate: function (key, pct) { return ipcRenderer.invoke('enable-affiliate', { key: key, pct: pct }); },
+  disableAffiliate: function (key) { return ipcRenderer.invoke('disable-affiliate', key); },
+  markReferralPaid: function (id) { return ipcRenderer.invoke('mark-referral-paid', id); },
+  registerReferral: function (data) { return ipcRenderer.invoke('register-referral', data); },
+  onAffiliateUpdate: function (cb) { ipcRenderer.on('affiliate-update', function (e, d) { cb(d); }); }
 });

@@ -30,11 +30,12 @@ var UI = (function () {
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
     document.querySelectorAll('.nav-btn').forEach(function (b) { b.classList.remove('active'); });
     $('tab-' + name).classList.add('active');
-    var tabs = ['dashboard', 'licenses', 'create', 'network', 'logs'];
+    var tabs = ['dashboard', 'licenses', 'create', 'network', 'logs', 'affiliate'];
     var idx = tabs.indexOf(name);
     var btns = document.querySelectorAll('.nav-btn');
     if (btns[idx]) btns[idx].classList.add('active');
     if (name === 'licenses') refresh();
+    if (name === 'affiliate') loadAffiliates();
   }
 
   // ─── Format ───────────────────────────────────────
@@ -341,10 +342,147 @@ var UI = (function () {
     Haleem.onDevicePaired(function (d) { toast('📱 Paired: ' + d.name); });
     Haleem.onDeviceUnpaired(function () { toast('📱 Unpaired'); });
 
+    // Affiliate data listener
+    Haleem.onAffiliateUpdate(function (data) {
+      _affiliateData = data;
+      renderAffiliates();
+    });
+
     // Initial load
     Haleem.getServerInfo().then(updateServerInfo);
     setTimeout(refresh, 1000);
     setInterval(refresh, 8000);
+  }
+
+  // ─── Affiliate ────────────────────────────────────
+  var _affiliateData = { affiliates: [], referrals: [] };
+
+  function loadAffiliates() {
+    if (window.Haleem && Haleem.getAffiliates) {
+      Haleem.getAffiliates().then(function (data) {
+        if (data) { _affiliateData = data; renderAffiliates(); }
+      });
+    }
+  }
+
+  function renderAffiliates() {
+    var affiliates = _affiliateData.affiliates || [];
+    var referrals = _affiliateData.referrals || [];
+
+    // Stats
+    var totalPending = 0, totalPaid = 0, totalRefs = 0;
+    affiliates.forEach(function (a) {
+      totalRefs += (a.total_referrals || 0);
+      totalPending += (a.pending_balance || 0);
+      totalPaid += (a.paid_balance || 0);
+    });
+    if ($('aff-total')) $('aff-total').textContent = affiliates.length;
+    if ($('aff-referrals')) $('aff-referrals').textContent = totalRefs;
+    if ($('aff-pending')) $('aff-pending').textContent = '$' + totalPending.toFixed(0);
+    if ($('aff-paid')) $('aff-paid').textContent = '$' + totalPaid.toFixed(0);
+
+    // Affiliates list
+    var container = $('affiliate-list');
+    if (!container) return;
+    if (!affiliates.length) {
+      container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">No affiliates yet. Enable one above.</div>';
+    } else {
+      var html = '';
+      affiliates.forEach(function (a) {
+        var statusClass = a.status === 'enabled' ? 'status-activated' : 'status-revoked';
+        var badgeClass = a.status === 'enabled' ? 'badge-activated' : 'badge-revoked';
+        html += '<div class="lic-card ' + statusClass + '">';
+        html += '<div class="lic-header">';
+        html += '<span class="lic-name">' + esc(a.customer_name || a.user_key) + '</span>';
+        html += '<span class="lic-badge ' + badgeClass + '">' + a.status + '</span>';
+        html += '</div>';
+        html += '<div class="lic-key">🔗 ' + a.affiliate_code + ' | Commission: ' + a.commission_pct + '%</div>';
+        html += '<div class="lic-info">📊 Referrals: ' + (a.total_referrals || 0) + ' | Pending: $' + (a.pending_balance || 0).toFixed(0) + ' | Paid: $' + (a.paid_balance || 0).toFixed(0) + '</div>';
+        html += '<div class="lic-info">📅 ' + formatDate(a.created_at) + '</div>';
+        html += '<div class="lic-actions">';
+        if (a.status === 'enabled') {
+          html += '<button class="btn btn-danger btn-sm" onclick="UI.disableAffiliate(\'' + a.user_key + '\')">🔴 Disable</button>';
+        } else {
+          html += '<button class="btn btn-green btn-sm" onclick="UI.enableAffiliateKey(\'' + a.user_key + '\')">✅ Enable</button>';
+        }
+        html += '<button class="btn btn-dark btn-sm" onclick="UI.copyText(\'' + a.affiliate_code + '\')">📋 Code</button>';
+        html += '</div></div>';
+      });
+      container.innerHTML = html;
+    }
+
+    // Referrals list
+    var refContainer = $('referral-list');
+    if (!refContainer) return;
+    // Flatten all referrals from affiliate data if not already flat
+    var allRefs = referrals.length ? referrals : [];
+    if (!allRefs.length) {
+      refContainer.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">No referrals recorded yet.</div>';
+    } else {
+      var rhtml = '';
+      allRefs.forEach(function (r) {
+        var statusColor = r.status === 'paid' ? 'badge-activated' : (r.status === 'approved' ? 'badge-activated' : 'badge-pending');
+        var affOwner = affiliates.find(function(a) { return a.user_key === r.affiliate_user_key; });
+        rhtml += '<div class="lic-card">';
+        rhtml += '<div class="lic-header">';
+        rhtml += '<span class="lic-name">' + esc(r.referred_customer || r.referred_key || 'Unknown') + '</span>';
+        rhtml += '<span class="lic-badge ' + statusColor + '">' + r.status + '</span>';
+        rhtml += '</div>';
+        rhtml += '<div class="lic-key">🔑 Affiliate: ' + esc(affOwner ? (affOwner.customer_name || affOwner.user_key) : r.affiliate_user_key) + '</div>';
+        if (r.order_id) rhtml += '<div class="lic-info">🧾 Order: ' + esc(r.order_id) + '</div>';
+        rhtml += '<div class="lic-info">💰 Commission: $' + (r.commission || 0).toFixed(2) + ' | 📅 ' + formatDate(r.created_at) + '</div>';
+        rhtml += '<div class="lic-actions">';
+        if (r.status !== 'paid') {
+          rhtml += '<button class="btn btn-green btn-sm" onclick="UI.markReferralPaid(\'' + r.id + '\')">💵 Mark Paid</button>';
+        }
+        rhtml += '</div></div>';
+      });
+      refContainer.innerHTML = rhtml;
+    }
+  }
+
+  function enableAffiliate() {
+    var key = ($('aff-enable-key').value || '').trim();
+    var pct = parseInt($('aff-enable-pct').value) || 20;
+    if (!key) { toast('Enter a license key'); return; }
+    Haleem.enableAffiliate(key, pct);
+    toast('✅ Enabling affiliate...');
+    $('aff-enable-key').value = '';
+    setTimeout(loadAffiliates, 500);
+  }
+
+  function enableAffiliateKey(key) {
+    Haleem.enableAffiliate(key, 20);
+    toast('✅ Re-enabling...');
+    setTimeout(loadAffiliates, 500);
+  }
+
+  function disableAffiliate(key) {
+    if (!confirm('Disable affiliate for ' + key + '?')) return;
+    Haleem.disableAffiliate(key);
+    toast('🔴 Disabling...');
+    setTimeout(loadAffiliates, 500);
+  }
+
+  function markReferralPaid(id) {
+    if (!confirm('Mark this referral as paid?')) return;
+    Haleem.markReferralPaid(id);
+    toast('💵 Marking as paid...');
+    setTimeout(loadAffiliates, 500);
+  }
+
+  function registerReferral() {
+    var affKey = ($('ref-aff-key').value || '').trim();
+    var refKey = ($('ref-referred-key').value || '').trim();
+    var orderVal = parseFloat($('ref-order-value').value) || 0;
+    var orderId = ($('ref-order-id').value || '').trim();
+    if (!affKey || !refKey) { toast('Enter both affiliate and referred keys'); return; }
+    Haleem.registerReferral({ affiliate_key: affKey, referred_key: refKey, order_value: orderVal, order_id: orderId });
+    toast('📥 Registering referral...');
+    $('ref-aff-key').value = '';
+    $('ref-referred-key').value = '';
+    $('ref-order-id').value = '';
+    setTimeout(loadAffiliates, 500);
   }
 
   return {
@@ -355,6 +493,13 @@ var UI = (function () {
     createKey: createKey,
     deleteKey: deleteKey,
     unpairDevice: unpairDevice, copyText: copyText, copyToken: copyToken,
-    copyTunnel: copyTunnel, exportData: exportData
+    copyTunnel: copyTunnel, exportData: exportData,
+    // Affiliate
+    enableAffiliate: enableAffiliate,
+    enableAffiliateKey: enableAffiliateKey,
+    disableAffiliate: disableAffiliate,
+    markReferralPaid: markReferralPaid,
+    registerReferral: registerReferral,
+    loadAffiliates: loadAffiliates
   };
 })();
