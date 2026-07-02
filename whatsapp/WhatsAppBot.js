@@ -24,34 +24,27 @@ const INSTALL_VIDEO_PATH = fs.existsSync(path.join(APP_MEDIA_DIR, 'install_guide
     ? path.join(APP_MEDIA_DIR, 'install_guide.mp4')
     : path.join(MEDIA_DIR, 'install_guide.mp4');
 
-const DOWNLOAD_KEYWORDS = ['تحميل', 'تنزيل', 'download', 'install', 'اريد البلجن', 'عايز البلجن', 'ابي البلجن', 'ابغى البلجن', 'كيف احمل', 'كيف انزل', 'طريقة التثبيت', 'طريقة التحميل'];
+const DOWNLOAD_KEYWORDS = ['تحميل', 'تنزيل', 'download', 'install', 'اريد البلجن', 'عايز البلجن', 'ابي البلجن', 'ابغى البلجن', 'كيف احمل', 'كيف انزل', 'طريقة التثبيت', 'طريقة التحميل', 'اي ملف', 'أي ملف', 'which file', 'ملف احمل', 'ملف أحمل', 'انهو ملف', 'انهي ملف'];
 
-const INSTALL_GUIDE_TEXT = `دي طريقة التثبيت والتنشيط ولكن الشرح كامل في الفيديو علي :
+const DOWNLOAD_GUIDE_IMG = path.join(__dirname, '..', 'media', 'download_guide.png');
 
-فيس بوك:
-https://www.facebook.com/share/v/1D4Lwtk19i/
-يوتيوب:
-https://youtu.be/ADhj1aeGcW8?si=8eQqzDaiTm2eIrYA
-تيك توك:
-https://vm.tiktok.com/ZNRvQKBT1/
-
-
-تثبيت بلجن HALEEM-ULTRA سهل جداً، فقط اتبع الخطوات التالية بالترتيب:
+const INSTALL_GUIDE_TEXT = `تثبيت بلجن HALEEM-ULTRA سهل جداً! فقط اتبع الخطوات التالية:
 
 1. أولاً، قم بتحميل برنامج Ollama من الرابط التالي وثبّته على جهازك:
 https://ollama.com/
 2. افتح إعدادات Ollama وسجّل دخولك باستخدام حساب Gmail الخاص بك.
-3. انتقل إلى رابط البلجن التالي:
+3. انتقل إلى صفحة التحميل من الرابط التالي:
 https://github.com/haleemrz/HALEEM-Releases/releases
-4. قم بنسخ "سكريبت التحميل" الموجود في الصفحة.
-5. افتح برنامج PowerShell على جهازك كمسؤول (Run as Administrator).
-6. الصق السكريبت الذي نسخته واضغط Enter.
-7. انتظر قليلاً حتى ينتهي PowerShell من عملية التثبيت بالكامل.
-8. الآن افتح برنامج أدوبي بريمير، وستجد البلجن جاهزة للعمل!
+4. اضغط على ملف *HALEEM-ULTRA-Setup-v3.1.7.exe* لتحميله (الملف الأول في قائمة Assets).
+5. بعد التحميل، افتح ملف الـ exe وثبّته بشكل عادي.
+6. الآن افتح برنامج أدوبي بريمير، وستجد البلجن جاهزة للعمل!
+
+الشرح كامل في الفيديو:
+فيس بوك: https://www.facebook.com/share/v/1D4Lwtk19i/
+يوتيوب: https://youtu.be/ADhj1aeGcW8?si=8eQqzDaiTm2eIrYA
 
 *ملاحظة هامة:* البلجن تعمل على إصدار Premiere Pro 2024 وما بعده. إذا كان إصدارك قديماً، يمكنك تحميل نسخة حديثة من هنا:
 https://drive.google.com/drive/folders/1Gmi3Qu9HrPcVIYleKiFjqzzfQeCTdKgZ?usp=sharing
-(وننصحك بتحميل إصدار 2025 إذا كان جهازك ضعيفاً لأنها تعمل بكفاءة أعلى).
 
 بعد أن تثبت البلجن ستعمل معك مدة تجريبية لمدة ساعتين؛ بعد أن تجرب البلجن عد مجددا الي هنا وأخبرني "اريد الشراء أو اريد الدفع أو عايز اشتري" ويرجي عدم طلب الشراء قبل التحميل والتجربة والرضاء بالمنتج أولاً.`;
 
@@ -416,12 +409,19 @@ class WhatsAppBot {
         throw new Error('createKey function not set');
     }
 
-    // ─── Install Guide (Text only, no video) ────────────────────
+    // ─── Install Guide (Text + download screenshot) ────────────
     async _sendInstallGuide(msg) {
         try {
             const chat = await msg.getChat();
             await chat.sendMessage(INSTALL_GUIDE_TEXT);
             this.sendLog('[WhatsApp] 📋 تم إرسال دليل التثبيت');
+
+            // Send download guide screenshot if exists
+            if (fs.existsSync(DOWNLOAD_GUIDE_IMG)) {
+                const media = MessageMedia.fromFilePath(DOWNLOAD_GUIDE_IMG);
+                await chat.sendMessage(media, { caption: '📥 اضغط على الملف المُحدد في الصورة لتحميله' });
+                this.sendLog('[WhatsApp] 📸 تم إرسال صورة دليل التحميل');
+            }
         } catch (e) {
             this.sendLog('[WhatsApp] ⚠️ فشل إرسال دليل التثبيت: ' + e.message);
         }
