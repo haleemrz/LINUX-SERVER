@@ -36,7 +36,7 @@ var UI = (function () {
     if (btns[idx]) btns[idx].classList.add('active');
     if (name === 'licenses') refresh();
     if (name === 'affiliate') loadAffiliates();
-    if (name === 'whatsapp') waRefreshStatus();
+    if (name === 'whatsapp') { waRefreshStatus(); waLoadKB(); }
   }
 
   // ─── Format ───────────────────────────────────────
@@ -495,7 +495,7 @@ var UI = (function () {
         var el = $('wa-status');
         if (el) {
           var s = data.status || 'unknown';
-          el.textContent = s === 'connected' ? '🟢 Connected' : s === 'connecting' ? '🟡 Connecting' : '🔴 Disconnected';
+          el.textContent = (s === 'connected' || s === 'ready') ? '🟢 Connected' : s === 'connecting' || s === 'initializing' ? '🟡 Connecting' : '🔴 Disconnected';
         }
         if (data.qr) {
           var qrC = $('wa-qr-container');
@@ -552,6 +552,19 @@ var UI = (function () {
     }
   }
 
+  function waLoadKB() {
+    if (window.Haleem && Haleem.waGetKB) {
+      Haleem.waGetKB().then(function(data) {
+        if (!data || data.error) return;
+        var kb = $('wa-kb');
+        if (kb) {
+          // Format KB data as readable JSON
+          kb.value = JSON.stringify(data, null, 2);
+        }
+      });
+    }
+  }
+
   return {
     switchTab: switchTab, filterList: filterList, refresh: refresh,
     activateKey: activateKey,
@@ -571,6 +584,7 @@ var UI = (function () {
     waConnect: waConnect,
     waDisconnect: waDisconnect,
     waRefreshStatus: waRefreshStatus,
-    waSaveKB: waSaveKB
+    waSaveKB: waSaveKB,
+    waLoadKB: waLoadKB
   };
 })();
