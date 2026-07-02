@@ -656,7 +656,7 @@ function handleAffiliateEnable(req, res, ip, bodyStr) {
   var existing = _affiliateData.affiliates.find(function (a) { return a.user_key === body.key; });
   if (existing) {
     existing.status = 'enabled';
-    if (body.commission_pct !== undefined) existing.commission_pct = parseFloat(body.commission_pct) || 20;
+    if (body.commission_pct !== undefined) existing.commission_pct = parseFloat(body.commission_pct) || 25;
   } else {
     var code;
     var existingCodes = new Set(_affiliateData.affiliates.map(function (a) { return a.affiliate_code; }));
@@ -664,7 +664,7 @@ function handleAffiliateEnable(req, res, ip, bodyStr) {
     _affiliateData.affiliates.push({
       user_key: body.key,
       affiliate_code: code,
-      commission_pct: parseFloat(body.commission_pct) || 20,
+      commission_pct: parseFloat(body.commission_pct) || 25,
       status: 'enabled',
       created_at: new Date().toISOString()
     });
@@ -713,7 +713,7 @@ function handleAffiliateDashboard(req, res, ip, bodyStr) {
 
   sendJSON(res, 200, {
     affiliate_code: aff.affiliate_code,
-    referral_link: (tunnelUrl || 'https://haleem.app') + '/ref/' + aff.affiliate_code,
+    referral_link: 'https://haleem.app/ref/' + aff.affiliate_code,
     pending_balance: pending,
     paid_balance: paid,
     total_referrals: refs.length,
@@ -763,6 +763,33 @@ function handleAffiliateMarkPaid(req, res, ip, bodyStr) {
   if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
   log('REFERRAL_PAID', { id: body.id, ip: ip });
   sendJSON(res, 200, { message: 'Marked as paid', id: body.id });
+}
+
+function handleAffiliatePayAll(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.key) { sendJSON(res, 400, { error: 'Missing affiliate key' }); return; }
+
+  var aff = _affiliateData.affiliates.find(function (a) { return a.user_key === body.key; });
+  if (!aff) { sendJSON(res, 404, { error: 'Affiliate not found' }); return; }
+
+  var paidCount = 0;
+  var paidTotal = 0;
+  _affiliateData.referrals.forEach(function (r) {
+    if (r.affiliate_user_key === body.key && r.status !== 'paid') {
+      r.status = 'paid';
+      r.paid_at = new Date().toISOString();
+      paidCount++;
+      paidTotal += r.commission;
+    }
+  });
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('AFFILIATE_PAY_ALL', { key: body.key, count: paidCount, total: paidTotal, ip: ip });
+  sendJSON(res, 200, { message: 'All referrals paid', count: paidCount, total: paidTotal });
 }
 
 function handleAffiliateRegisterReferral(req, res, ip, bodyStr) {
@@ -993,6 +1020,7 @@ function handleRequest(req, res) {
     if (method === 'GET' && url.indexOf('/api/affiliate/referrals') === 0) return handleAffiliateReferrals(req, res, ip, bodyStr);
     if (method === 'POST' && url === '/api/affiliate/mark-paid') return handleAffiliateMarkPaid(req, res, ip, bodyStr);
     if (method === 'POST' && url === '/api/affiliate/register-referral') return handleAffiliateRegisterReferral(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/affiliate/pay-all') return handleAffiliatePayAll(req, res, ip, bodyStr);
 
     sendJSON(res, 403, { error: 'Forbidden' });
   });
@@ -1062,7 +1090,7 @@ function start(sslCert, sslKey) {
           var existingAff = _affiliateData.affiliates.find(function (a) { return a.user_key === msg.key; });
           if (existingAff) {
             existingAff.status = 'enabled';
-            if (msg.commission_pct !== undefined) existingAff.commission_pct = parseFloat(msg.commission_pct) || 20;
+            if (msg.commission_pct !== undefined) existingAff.commission_pct = parseFloat(msg.commission_pct) || 25;
           } else {
             var affCode;
             var affCodes = new Set(_affiliateData.affiliates.map(function (a) { return a.affiliate_code; }));
@@ -1070,7 +1098,7 @@ function start(sslCert, sslKey) {
             _affiliateData.affiliates.push({
               user_key: msg.key,
               affiliate_code: affCode,
-              commission_pct: parseFloat(msg.commission_pct) || 20,
+              commission_pct: parseFloat(msg.commission_pct) || 25,
               status: 'enabled',
               created_at: new Date().toISOString()
             });
@@ -1101,6 +1129,19 @@ function start(sslCert, sslKey) {
               commission: comm,
               status: 'pending',
               created_at: new Date().toISOString()
+            });
+            saveAffiliates();
+          }
+          if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+          break;
+        case 'pay-all-affiliate':
+          var payAllAff = _affiliateData.affiliates.find(function (a) { return a.user_key === msg.key; });
+          if (payAllAff) {
+            _affiliateData.referrals.forEach(function (r) {
+              if (r.affiliate_user_key === msg.key && r.status !== 'paid') {
+                r.status = 'paid';
+                r.paid_at = new Date().toISOString();
+              }
             });
             saveAffiliates();
           }

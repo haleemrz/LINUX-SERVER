@@ -27,5 +27,6 @@ contextBridge.exposeInMainWorld('Haleem', {
   disableAffiliate: function (key) { return ipcRenderer.invoke('disable-affiliate', key); },
   markReferralPaid: function (id) { return ipcRenderer.invoke('mark-referral-paid', id); },
   registerReferral: function (data) { return ipcRenderer.invoke('register-referral', data); },
+  payAllAffiliate: function (key) { return ipcRenderer.invoke('pay-all-affiliate', key); },
   onAffiliateUpdate: function (cb) { ipcRenderer.on('affiliate-update', function (e, d) { cb(d); }); }
 });

@@ -399,11 +399,15 @@ var UI = (function () {
         html += '<div class="lic-key">🔗 ' + a.affiliate_code + ' | Commission: ' + a.commission_pct + '%</div>';
         html += '<div class="lic-info">📊 Referrals: ' + (a.total_referrals || 0) + ' | Pending: $' + (a.pending_balance || 0).toFixed(0) + ' | Paid: $' + (a.paid_balance || 0).toFixed(0) + '</div>';
         html += '<div class="lic-info">📅 ' + formatDate(a.created_at) + '</div>';
+        html += '<div class="lic-info">🔗 https://haleem.app/ref/' + a.affiliate_code + '</div>';
         html += '<div class="lic-actions">';
         if (a.status === 'enabled') {
           html += '<button class="btn btn-danger btn-sm" onclick="UI.disableAffiliate(\'' + a.user_key + '\')">🔴 Disable</button>';
         } else {
           html += '<button class="btn btn-green btn-sm" onclick="UI.enableAffiliateKey(\'' + a.user_key + '\')">✅ Enable</button>';
+        }
+        if ((a.pending_balance || 0) > 0) {
+          html += '<button class="btn btn-gold btn-sm" onclick="UI.payAllAffiliate(\'' + a.user_key + '\')">💰 Pay All ($' + (a.pending_balance || 0).toFixed(0) + ')</button>';
         }
         html += '<button class="btn btn-dark btn-sm" onclick="UI.copyText(\'' + a.affiliate_code + '\')">📋 Code</button>';
         html += '</div></div>';
@@ -443,7 +447,7 @@ var UI = (function () {
 
   function enableAffiliate() {
     var key = ($('aff-enable-key').value || '').trim();
-    var pct = parseInt($('aff-enable-pct').value) || 20;
+    var pct = parseInt($('aff-enable-pct').value) || 25;
     if (!key) { toast('Enter a license key'); return; }
     Haleem.enableAffiliate(key, pct);
     toast('✅ Enabling affiliate...');
@@ -452,7 +456,7 @@ var UI = (function () {
   }
 
   function enableAffiliateKey(key) {
-    Haleem.enableAffiliate(key, 20);
+    Haleem.enableAffiliate(key, 25);
     toast('✅ Re-enabling...');
     setTimeout(loadAffiliates, 500);
   }
@@ -485,6 +489,13 @@ var UI = (function () {
     setTimeout(loadAffiliates, 500);
   }
 
+  function payAllAffiliate(key) {
+    if (!confirm('Pay ALL pending referrals for this affiliate and reset counter?')) return;
+    Haleem.payAllAffiliate(key);
+    toast('💰 Paying all pending...');
+    setTimeout(loadAffiliates, 500);
+  }
+
   return {
     switchTab: switchTab, filterList: filterList, refresh: refresh,
     activateKey: activateKey,
@@ -500,6 +511,7 @@ var UI = (function () {
     disableAffiliate: disableAffiliate,
     markReferralPaid: markReferralPaid,
     registerReferral: registerReferral,
+    payAllAffiliate: payAllAffiliate,
     loadAffiliates: loadAffiliates
   };
 })();

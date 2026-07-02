@@ -544,6 +544,18 @@ ipcMain.handle('register-referral', function (e, data) {
   }
 });
 
+ipcMain.handle('pay-all-affiliate', function (e, key) {
+  if (useBackgroundApi) {
+    makeAdminRequest('POST', '/api/affiliate/pay-all', { key: key }, function(err, res) {
+      makeAdminRequest('GET', '/api/affiliate/list', null, function(err2, res2) {
+        if (!err2 && res2 && mainWindow) mainWindow.webContents.send('affiliate-update', res2);
+      });
+    });
+  } else if (serverProcess) {
+    serverProcess.send({ action: 'pay-all-affiliate', key: key });
+  }
+});
+
 // ─── Window ────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
