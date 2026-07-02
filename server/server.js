@@ -184,6 +184,63 @@ function generateReferralId() {
   return 'ref_' + crypto.randomBytes(6).toString('hex');
 }
 
+function autoCreateAffiliate(licKey) {
+  var existing = _affiliateData.affiliates.find(function (a) { return a.user_key === licKey; });
+  if (existing) return existing.affiliate_code;
+  var code;
+  var existingCodes = new Set(_affiliateData.affiliates.map(function (a) { return a.affiliate_code; }));
+  do { code = generateAffiliateCode(); } while (existingCodes.has(code));
+  _affiliateData.affiliates.push({
+    user_key: licKey,
+    affiliate_code: code,
+    commission_pct: 25,
+    status: 'enabled',
+    created_at: new Date().toISOString()
+  });
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  return code;
+}
+
+// One-time migration: create affiliate codes for all existing activated clients
+function migrateExistingClientsToAffiliate() {
+  var migrated = 0;
+  _licenses.forEach(function (lic) {
+    if (lic.status === 'activated') {
+      var existing = _affiliateData.affiliates.find(function (a) { return a.user_key === lic.key; });
+      if (!existing) {
+        autoCreateAffiliate(lic.key);
+        migrated++;
+      }
+    }
+  });
+  if (migrated > 0) {
+    log('AFFILIATE_MIGRATION', { migrated: migrated, total: _affiliateData.affiliates.length });
+  }
+}
+
+function processReferralCode(referralCode, referredKey) {
+  if (!referralCode) return;
+  var aff = _affiliateData.affiliates.find(function (a) { return a.affiliate_code === referralCode && a.status === 'enabled'; });
+  if (!aff) return;
+  if (aff.user_key === referredKey) return; // can't refer self
+  var alreadyReferred = _affiliateData.referrals.find(function (r) { return r.referred_user_key === referredKey; });
+  if (alreadyReferred) return; // already has a referrer
+  var referral = {
+    id: generateReferralId(),
+    affiliate_user_key: aff.user_key,
+    referred_user_key: referredKey,
+    order_id: '',
+    commission: 250,
+    status: 'pending',
+    created_at: new Date().toISOString()
+  };
+  _affiliateData.referrals.push(referral);
+  saveAffiliates();
+  if (process.send) process.send({ type: 'affiliate-update', data: _affiliateData });
+  log('AUTO_REFERRAL', { affiliate: aff.user_key, referred: referredKey });
+}
+
 // ════════════════════════════════════════════════════════
 // KEY GENERATION
 // ════════════════════════════════════════════════════════
@@ -468,6 +525,8 @@ function handleActivate(req, res, ip, bodyStr) {
     lic.signature = signLicense(lic.key, lic.device_id || 'unbound', ts);
     lic.last_ip = ip;
     saveLicenses();
+    autoCreateAffiliate(lic.key);
+    if (lic.referral_code) processReferralCode(lic.referral_code, lic.key);
     log('KEY_ACTIVATED', { key: lic.key, ip: ip });
     sendJSON(res, 200, { message: 'Activated', key: lic.key, status: 'activated' });
 
@@ -490,17 +549,21 @@ function handleActivate(req, res, ip, bodyStr) {
     if (lic.status === 'activated') {
       lic.last_seen = new Date().toISOString();
       saveLicenses();
+      // Find user's affiliate code to include in response
+      var userAff = _affiliateData.affiliates.find(function (a) { return a.user_key === lic.key; });
       sendJSON(res, 200, {
         status: 'activated',
         key: lic.key,
         device_id: lic.device_id,
         signature: lic.signature,
         timestamp: lic.sign_timestamp,
-        public_key: _rsaPublic
+        public_key: _rsaPublic,
+        referral_code: userAff ? userAff.affiliate_code : null
       });
     } else if (lic.status === 'unused' || lic.status === 'pending') {
       lic.status = 'pending';
       lic.requested_at = new Date().toISOString();
+      if (body.referral_code) lic.referral_code = body.referral_code;
       saveLicenses();
       log('ACTIVATION_REQUEST', { key: lic.key, device_id: lic.device_id, ip: ip });
       sendJSON(res, 202, { message: 'Activation request submitted. Waiting for approval.', status: 'pending' });
@@ -825,6 +888,66 @@ function handleAffiliateRegisterReferral(req, res, ip, bodyStr) {
   sendJSON(res, 200, { message: 'Referral registered', referral: referral });
 }
 
+// ─── Client-facing affiliate endpoints (HMAC-signed, no admin) ───
+function handleSubmitReferral(req, res, ip, bodyStr) {
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.key || !body.referral_code) { sendJSON(res, 400, { error: 'Missing key or referral_code' }); return; }
+
+  var lic = _licenses.find(function (l) { return l.key === body.key; });
+  if (!lic) { sendJSON(res, 404, { error: 'Key not found' }); return; }
+
+  var alreadyReferred = _affiliateData.referrals.find(function (r) { return r.referred_user_key === body.key; });
+  if (alreadyReferred) { sendJSON(res, 200, { message: 'Referral already recorded' }); return; }
+
+  processReferralCode(body.referral_code, body.key);
+  lic.referral_code = body.referral_code;
+  saveLicenses();
+  sendJSON(res, 200, { message: 'Referral code submitted' });
+}
+
+function handleMyAffiliate(req, res, ip, bodyStr) {
+  var params = parseQueryParams(req.url);
+  var key = params.key;
+  if (!key) { sendJSON(res, 400, { error: 'Missing key' }); return; }
+
+  var lic = _licenses.find(function (l) { return l.key === key; });
+  if (!lic) { sendJSON(res, 404, { error: 'Key not found' }); return; }
+
+  var aff = _affiliateData.affiliates.find(function (a) { return a.user_key === key; });
+  var affCode = aff ? aff.affiliate_code : null;
+
+  // My referrals (people who used my code)
+  var myRefs = aff ? _affiliateData.referrals.filter(function (r) { return r.affiliate_user_key === key; }) : [];
+  var pendingBalance = 0;
+  var referrals = myRefs.map(function (r) {
+    var refLic = _licenses.find(function (l) { return l.key === r.referred_user_key; });
+    var isActivated = refLic && refLic.status === 'activated';
+    if (r.status !== 'paid') pendingBalance += r.commission;
+    return {
+      id: r.id,
+      customer_name: (r.status === 'paid' || isActivated) ? (refLic ? refLic.customer_name : 'Unknown') : 'مشتري جديد (قيد الانتظار)',
+      status: r.status,
+      commission: r.commission,
+      created_at: r.created_at
+    };
+  });
+
+  // Who referred me?
+  var myReferral = _affiliateData.referrals.find(function (r) { return r.referred_user_key === key; });
+  var referredBy = myReferral ? myReferral.affiliate_user_key : null;
+  var myReferralCode = lic.referral_code || null;
+
+  sendJSON(res, 200, {
+    affiliate_code: affCode,
+    referral_link: affCode ? 'https://haleem.app/ref/' + affCode : null,
+    pending_balance: pendingBalance,
+    referrals: referrals,
+    referred_by: referredBy,
+    my_referral_code: myReferralCode
+  });
+}
+
 // ════════════════════════════════════════════════════════
 // ROUTER
 // ════════════════════════════════════════════════════════
@@ -1022,6 +1145,10 @@ function handleRequest(req, res) {
     if (method === 'POST' && url === '/api/affiliate/register-referral') return handleAffiliateRegisterReferral(req, res, ip, bodyStr);
     if (method === 'POST' && url === '/api/affiliate/pay-all') return handleAffiliatePayAll(req, res, ip, bodyStr);
 
+    // ═══ CLIENT AFFILIATE API (HMAC-signed, no admin token needed) ═══
+    if (method === 'POST' && url === '/api/submit-referral') return handleSubmitReferral(req, res, ip, bodyStr);
+    if (method === 'GET' && url.indexOf('/api/my-affiliate') === 0) return handleMyAffiliate(req, res, ip, bodyStr);
+
     sendJSON(res, 403, { error: 'Forbidden' });
   });
 }
@@ -1041,6 +1168,14 @@ function start(sslCert, sslKey) {
   var httpServer = http.createServer(handleRequest);
   httpServer.listen(httpPort, BIND, function () {
     log('HTTP_LISTENING', { port: httpPort });
+    // Notify parent (Electron) that server is ready
+    if (process.send) process.send({
+      type: 'ready',
+      token: _adminToken,
+      publicKey: _rsaPublic,
+      paired: _pairedDevice,
+      httpPort: httpPort
+    });
   });
 
   if (sslCert && sslKey) {
@@ -1053,6 +1188,8 @@ function start(sslCert, sslKey) {
   // Start background tunnel and WhatsApp Bot automatically
   startTunnel();
   initWhatsApp();
+  // Migrate existing activated clients to affiliate system
+  migrateExistingClientsToAffiliate();
 
   if (process.on) {
     process.on('message', function (msg) {
@@ -1081,6 +1218,39 @@ function start(sslCert, sslKey) {
           _licenses = _licenses.filter(function (l) { return l.key !== msg.key; });
           saveLicenses();
           if (process.send) process.send({ type: 'key-deleted', key: msg.key });
+          break;
+        case 'activate-key':
+          var aLic = _licenses.find(function (l) { return l.key === msg.key; });
+          if (aLic && aLic.status !== 'activated' && aLic.status !== 'revoked') {
+            var ts = Date.now().toString();
+            aLic.status = 'activated';
+            aLic.activated_at = new Date().toISOString();
+            aLic.sign_timestamp = ts;
+            aLic.signature = signLicense(aLic.key, aLic.device_id || 'unbound', ts);
+            saveLicenses();
+            autoCreateAffiliate(aLic.key);
+            if (aLic.referral_code) processReferralCode(aLic.referral_code, aLic.key);
+            log('KEY_ACTIVATED', { key: aLic.key });
+          }
+          break;
+        case 'revoke-key':
+          var rLic = _licenses.find(function (l) { return l.key === msg.key; });
+          if (rLic) {
+            rLic.status = 'revoked';
+            saveLicenses();
+            log('KEY_REVOKED', { key: rLic.key });
+          }
+          break;
+        case 'reactivate-key':
+          var rrLic = _licenses.find(function (l) { return l.key === msg.key; });
+          if (rrLic && rrLic.status === 'revoked') {
+            rrLic.status = 'unused';
+            rrLic.device_id = '';
+            rrLic.signature = '';
+            rrLic.activated_at = null;
+            saveLicenses();
+            log('KEY_REACTIVATED', { key: rrLic.key });
+          }
           break;
         // ═══ Affiliate IPC actions ═══════════════════════════
         case 'get-affiliate-data':

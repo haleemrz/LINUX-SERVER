@@ -187,8 +187,8 @@ function initializeServer() {
       loadConfigAndState();
       addLog('🟢 Connected to HALEEM Activation Server running in background');
       updateUI();
-      // Try to check if tunnel is active on backend or start local tunnel
-      startTunnel();
+      // Fetch tunnel URL from background server instead of starting a new one
+      fetchTunnelFromBackground();
     } else {
       addLog('ℹ️ Starting HALEEM Server locally...');
       startServer();
@@ -281,12 +281,41 @@ function updateUI() {
   });
 }
 
+// ─── Fetch Tunnel URL from Background Server ───────────
+function fetchTunnelFromBackground() {
+  makeAdminRequest('GET', '/api/status', null, function(err, data) {
+    if (!err && data && data.tunnelUrl) {
+      tunnelUrl = data.tunnelUrl;
+      addLog('🌍 Global URL (from background): ' + tunnelUrl);
+      if (mainWindow) mainWindow.webContents.send('tunnel-url', tunnelUrl);
+      updateUI();
+    } else {
+      // Server tunnel not ready yet, retry in 5s
+      setTimeout(fetchTunnelFromBackground, 5000);
+    }
+  });
+}
+
 // ─── Ngrok Tunnel (Global Access) ──────────────────────
 function startTunnel() {
   try {
     addLog('🌐 Starting Ngrok tunnel...');
-    var { spawn } = require('child_process');
-    tunnelInstance = spawn('ngrok', ['http', String(httpPort), '--log', 'stdout', '--log-level', 'info'], {
+    var { spawn, execSync } = require('child_process');
+    var DESKTOP_NGROK_TOKEN = '3EDQ3b3NxcreTM9THllI44ycvxZ_3NJDc6ZUpt9BZGkzdbWxL';
+    // Find ngrok - try PATH first, then winget location
+    var ngrokBin = 'ngrok';
+    try {
+      ngrokBin = execSync('where.exe ngrok', { encoding: 'utf8' }).trim().split('\n')[0].trim();
+    } catch(e) {
+      var wingetPath = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages');
+      var fs = require('fs');
+      if (fs.existsSync(wingetPath)) {
+        var dirs = fs.readdirSync(wingetPath).filter(function(d) { return d.toLowerCase().indexOf('ngrok') >= 0; });
+        if (dirs.length) ngrokBin = path.join(wingetPath, dirs[0], 'ngrok.exe');
+      }
+    }
+    addLog('🔧 Using ngrok: ' + ngrokBin);
+    tunnelInstance = spawn(ngrokBin, ['http', String(httpPort), '--authtoken', DESKTOP_NGROK_TOKEN, '--log', 'stdout', '--log-level', 'info'], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -554,6 +583,39 @@ ipcMain.handle('pay-all-affiliate', function (e, key) {
   } else if (serverProcess) {
     serverProcess.send({ action: 'pay-all-affiliate', key: key });
   }
+});
+
+// ═══ WhatsApp Bot IPC ═══
+ipcMain.handle('wa-status', function () {
+  return new Promise(function (resolve) {
+    makeAdminRequest('GET', '/wa-status', null, function (err, data) {
+      resolve(err ? { status: 'error', error: err } : data);
+    });
+  });
+});
+
+ipcMain.handle('wa-start', function () {
+  return new Promise(function (resolve) {
+    makeAdminRequest('POST', '/wa-start', {}, function (err, data) {
+      resolve(err ? { error: err } : data);
+    });
+  });
+});
+
+ipcMain.handle('wa-stop', function () {
+  return new Promise(function (resolve) {
+    makeAdminRequest('POST', '/wa-stop', {}, function (err, data) {
+      resolve(err ? { error: err } : data);
+    });
+  });
+});
+
+ipcMain.handle('wa-save-kb', function (e, text) {
+  return new Promise(function (resolve) {
+    makeAdminRequest('POST', '/wa-save-kb', { kb: text }, function (err, data) {
+      resolve(err ? { error: err } : data);
+    });
+  });
 });
 
 // ─── Window ────────────────────────────────────────────

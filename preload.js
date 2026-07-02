@@ -28,5 +28,10 @@ contextBridge.exposeInMainWorld('Haleem', {
   markReferralPaid: function (id) { return ipcRenderer.invoke('mark-referral-paid', id); },
   registerReferral: function (data) { return ipcRenderer.invoke('register-referral', data); },
   payAllAffiliate: function (key) { return ipcRenderer.invoke('pay-all-affiliate', key); },
-  onAffiliateUpdate: function (cb) { ipcRenderer.on('affiliate-update', function (e, d) { cb(d); }); }
+  onAffiliateUpdate: function (cb) { ipcRenderer.on('affiliate-update', function (e, d) { cb(d); }); },
+  // ═══ WhatsApp Bot ═══
+  waStatus: function () { return ipcRenderer.invoke('wa-status'); },
+  waStart: function () { return ipcRenderer.invoke('wa-start'); },
+  waStop: function () { return ipcRenderer.invoke('wa-stop'); },
+  waSaveKB: function (text) { return ipcRenderer.invoke('wa-save-kb', text); }
 });

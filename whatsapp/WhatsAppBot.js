@@ -42,7 +42,7 @@ https://vm.tiktok.com/ZNRvQKBT1/
 https://ollama.com/
 2. افتح إعدادات Ollama وسجّل دخولك باستخدام حساب Gmail الخاص بك.
 3. انتقل إلى رابط البلجن التالي:
-https://github.com/haleemrz/HALEEM-ULTRA-Releases
+https://github.com/haleemrz/HALEEM-Releases/releases
 4. قم بنسخ "سكريبت التحميل" الموجود في الصفحة.
 5. افتح برنامج PowerShell على جهازك كمسؤول (Run as Administrator).
 6. الصق السكريبت الذي نسخته واضغط Enter.
@@ -87,6 +87,7 @@ class WhatsAppBot {
         this._ollamaModel = 'gemma4:31b-cloud';
         this._chatStates = new Map();
         this._sentInstallGuide = new Set();
+        this._chatLocks = new Set(); // per-chat processing lock
         this._createKeyFn = null;
         this._getTunnelUrlFn = null;
         fs.ensureDirSync(WA_SESSIONS_DIR);
@@ -171,7 +172,9 @@ class WhatsAppBot {
             this._replyToOldUnread();
         });
 
-        this.client.on('message_create', async (msg) => {
+        // Use 'message' event (incoming only) instead of 'message_create' (all messages)
+        // to prevent processing our own outgoing messages and avoid duplicate replies
+        this.client.on('message', async (msg) => {
             try { await this._handleMessage(msg); }
             catch (e) { this.sendLog('[WhatsApp] ⚠️ خطأ: ' + e.message); }
         });
@@ -279,18 +282,34 @@ class WhatsAppBot {
         }
     }
 
-    // ─── Message Router ──────────────────────────────────
+    // ─── Message Router ────────────────────────────────────────
     async _handleMessage(msg) {
+        // Dedup check FIRST — before any async work
+        const msgId = msg.id._serialized || msg.id.id;
+        if (this._repliedMsgIds.has(msgId)) return;
+        this._repliedMsgIds.add(msgId);
+
+        // Cap set size to prevent memory leak
+        if (this._repliedMsgIds.size > 5000) {
+            const arr = Array.from(this._repliedMsgIds);
+            this._repliedMsgIds = new Set(arr.slice(arr.length - 2000));
+        }
+
         if (msg.from === 'status@broadcast') return;
         if (msg.fromMe) return;
 
         const chat = await msg.getChat();
         if (chat.isGroup) return;
 
-        if (this._repliedMsgIds.has(msg.id._serialized)) return;
-        this._repliedMsgIds.add(msg.id._serialized);
-
-        await this._handleDM(msg);
+        // Per-chat lock: only one reply at a time per conversation
+        const chatId = msg.from;
+        if (this._chatLocks.has(chatId)) return;
+        this._chatLocks.add(chatId);
+        try {
+            await this._handleDM(msg);
+        } finally {
+            this._chatLocks.delete(chatId);
+        }
     }
 
     // ─── Purchase Flow ───────────────────────────────────
@@ -397,21 +416,12 @@ class WhatsAppBot {
         throw new Error('createKey function not set');
     }
 
-    // ─── Install Guide (Text + Video) ────────────────────
+    // ─── Install Guide (Text only, no video) ────────────────────
     async _sendInstallGuide(msg) {
         try {
             const chat = await msg.getChat();
             await chat.sendMessage(INSTALL_GUIDE_TEXT);
             this.sendLog('[WhatsApp] 📋 تم إرسال دليل التثبيت');
-
-            // Send video if exists
-            if (fs.existsSync(INSTALL_VIDEO_PATH)) {
-                const media = MessageMedia.fromFilePath(INSTALL_VIDEO_PATH);
-                await chat.sendMessage(media, { caption: '🎬 فيديو شرح التثبيت والتنشيط' });
-                this.sendLog('[WhatsApp] 🎬 تم إرسال فيديو التثبيت');
-            } else {
-                this.sendLog('[WhatsApp] ⚠️ فيديو التثبيت غير موجود: ' + INSTALL_VIDEO_PATH);
-            }
         } catch (e) {
             this.sendLog('[WhatsApp] ⚠️ فشل إرسال دليل التثبيت: ' + e.message);
         }

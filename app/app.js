@@ -30,12 +30,13 @@ var UI = (function () {
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
     document.querySelectorAll('.nav-btn').forEach(function (b) { b.classList.remove('active'); });
     $('tab-' + name).classList.add('active');
-    var tabs = ['dashboard', 'licenses', 'create', 'network', 'logs', 'affiliate'];
+    var tabs = ['dashboard', 'licenses', 'create', 'network', 'logs', 'affiliate', 'whatsapp'];
     var idx = tabs.indexOf(name);
     var btns = document.querySelectorAll('.nav-btn');
     if (btns[idx]) btns[idx].classList.add('active');
     if (name === 'licenses') refresh();
     if (name === 'affiliate') loadAffiliates();
+    if (name === 'whatsapp') waRefreshStatus();
   }
 
   // ─── Format ───────────────────────────────────────
@@ -377,15 +378,15 @@ var UI = (function () {
       totalPaid += (a.paid_balance || 0);
     });
     if ($('aff-total')) $('aff-total').textContent = affiliates.length;
-    if ($('aff-referrals')) $('aff-referrals').textContent = totalRefs;
-    if ($('aff-pending')) $('aff-pending').textContent = '$' + totalPending.toFixed(0);
-    if ($('aff-paid')) $('aff-paid').textContent = '$' + totalPaid.toFixed(0);
+    if ($('aff-referrals')) $('aff-referrals').textContent = referrals.length;
+    if ($('aff-pending')) $('aff-pending').textContent = totalPending.toFixed(0) + ' EGP';
+    if ($('aff-paid')) $('aff-paid').textContent = totalPaid.toFixed(0) + ' EGP';
 
     // Affiliates list
     var container = $('affiliate-list');
     if (!container) return;
     if (!affiliates.length) {
-      container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">No affiliates yet. Enable one above.</div>';
+      container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)">No affiliates yet. Affiliates are created automatically when a key is activated.</div>';
     } else {
       var html = '';
       affiliates.forEach(function (a) {
@@ -396,8 +397,8 @@ var UI = (function () {
         html += '<span class="lic-name">' + esc(a.customer_name || a.user_key) + '</span>';
         html += '<span class="lic-badge ' + badgeClass + '">' + a.status + '</span>';
         html += '</div>';
-        html += '<div class="lic-key">🔗 ' + a.affiliate_code + ' | Commission: ' + a.commission_pct + '%</div>';
-        html += '<div class="lic-info">📊 Referrals: ' + (a.total_referrals || 0) + ' | Pending: $' + (a.pending_balance || 0).toFixed(0) + ' | Paid: $' + (a.paid_balance || 0).toFixed(0) + '</div>';
+        html += '<div class="lic-key">🔗 ' + a.affiliate_code + ' | Commission: 250 EGP/referral</div>';
+        html += '<div class="lic-info">📊 Referrals: ' + (a.total_referrals || 0) + ' | Pending: ' + (a.pending_balance || 0).toFixed(0) + ' EGP | Paid: ' + (a.paid_balance || 0).toFixed(0) + ' EGP</div>';
         html += '<div class="lic-info">📅 ' + formatDate(a.created_at) + '</div>';
         html += '<div class="lic-info">🔗 https://haleem.app/ref/' + a.affiliate_code + '</div>';
         html += '<div class="lic-actions">';
@@ -434,7 +435,7 @@ var UI = (function () {
         rhtml += '</div>';
         rhtml += '<div class="lic-key">🔑 Affiliate: ' + esc(affOwner ? (affOwner.customer_name || affOwner.user_key) : r.affiliate_user_key) + '</div>';
         if (r.order_id) rhtml += '<div class="lic-info">🧾 Order: ' + esc(r.order_id) + '</div>';
-        rhtml += '<div class="lic-info">💰 Commission: $' + (r.commission || 0).toFixed(2) + ' | 📅 ' + formatDate(r.created_at) + '</div>';
+        rhtml += '<div class="lic-info">💰 Commission: ' + (r.commission || 250) + ' EGP | 📅 ' + formatDate(r.created_at) + '</div>';
         rhtml += '<div class="lic-actions">';
         if (r.status !== 'paid') {
           rhtml += '<button class="btn btn-green btn-sm" onclick="UI.markReferralPaid(\'' + r.id + '\')">💵 Mark Paid</button>';
@@ -475,25 +476,80 @@ var UI = (function () {
     setTimeout(loadAffiliates, 500);
   }
 
-  function registerReferral() {
-    var affKey = ($('ref-aff-key').value || '').trim();
-    var refKey = ($('ref-referred-key').value || '').trim();
-    var orderVal = parseFloat($('ref-order-value').value) || 0;
-    var orderId = ($('ref-order-id').value || '').trim();
-    if (!affKey || !refKey) { toast('Enter both affiliate and referred keys'); return; }
-    Haleem.registerReferral({ affiliate_key: affKey, referred_key: refKey, order_value: orderVal, order_id: orderId });
-    toast('📥 Registering referral...');
-    $('ref-aff-key').value = '';
-    $('ref-referred-key').value = '';
-    $('ref-order-id').value = '';
-    setTimeout(loadAffiliates, 500);
-  }
+
 
   function payAllAffiliate(key) {
     if (!confirm('Pay ALL pending referrals for this affiliate and reset counter?')) return;
     Haleem.payAllAffiliate(key);
     toast('💰 Paying all pending...');
     setTimeout(loadAffiliates, 500);
+  }
+
+  // ─── WhatsApp Bot ────────────────────────────────
+  var _waQrTimer = null;
+
+  function waRefreshStatus() {
+    if (window.Haleem && Haleem.waStatus) {
+      Haleem.waStatus().then(function(data) {
+        if (!data) return;
+        var el = $('wa-status');
+        if (el) {
+          var s = data.status || 'unknown';
+          el.textContent = s === 'connected' ? '🟢 Connected' : s === 'connecting' ? '🟡 Connecting' : '🔴 Disconnected';
+        }
+        if (data.qr) {
+          var qrC = $('wa-qr-container');
+          if (qrC) qrC.innerHTML = '<img src="' + data.qr + '" style="max-width:260px;border-radius:8px">';
+        }
+        // Logs
+        if (data.logs && data.logs.length) {
+          var logsEl = $('wa-logs');
+          if (logsEl) {
+            var lhtml = '';
+            data.logs.slice(-50).forEach(function(l) {
+              lhtml += '<div style="padding:3px 6px;border-bottom:1px solid rgba(255,255,255,0.05)">' + esc(l.time + ' — ' + l.msg) + '</div>';
+            });
+            logsEl.innerHTML = lhtml;
+            logsEl.scrollTop = logsEl.scrollHeight;
+          }
+        }
+      });
+    }
+  }
+
+  function waConnect() {
+    toast('▶️ Starting WhatsApp...');
+    if (window.Haleem && Haleem.waStart) {
+      Haleem.waStart().then(function() {
+        toast('✅ WhatsApp connecting...');
+        // Start QR polling
+        if (_waQrTimer) clearInterval(_waQrTimer);
+        _waQrTimer = setInterval(waRefreshStatus, 3000);
+        setTimeout(waRefreshStatus, 1000);
+      });
+    }
+  }
+
+  function waDisconnect() {
+    if (!confirm('Disconnect WhatsApp Bot?')) return;
+    if (window.Haleem && Haleem.waStop) {
+      Haleem.waStop().then(function() {
+        toast('⏹️ WhatsApp disconnected');
+        if (_waQrTimer) { clearInterval(_waQrTimer); _waQrTimer = null; }
+        waRefreshStatus();
+      });
+    }
+  }
+
+  function waSaveKB() {
+    var kb = $('wa-kb');
+    if (!kb) return;
+    var text = kb.value.trim();
+    if (window.Haleem && Haleem.waSaveKB) {
+      Haleem.waSaveKB(text).then(function() {
+        toast('💾 KB saved!');
+      });
+    }
   }
 
   return {
@@ -506,12 +562,15 @@ var UI = (function () {
     unpairDevice: unpairDevice, copyText: copyText, copyToken: copyToken,
     copyTunnel: copyTunnel, exportData: exportData,
     // Affiliate
-    enableAffiliate: enableAffiliate,
     enableAffiliateKey: enableAffiliateKey,
     disableAffiliate: disableAffiliate,
     markReferralPaid: markReferralPaid,
-    registerReferral: registerReferral,
     payAllAffiliate: payAllAffiliate,
-    loadAffiliates: loadAffiliates
+    loadAffiliates: loadAffiliates,
+    // WhatsApp
+    waConnect: waConnect,
+    waDisconnect: waDisconnect,
+    waRefreshStatus: waRefreshStatus,
+    waSaveKB: waSaveKB
   };
 })();
