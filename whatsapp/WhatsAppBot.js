@@ -169,10 +169,12 @@ class WhatsAppBot {
             this._replyToOldUnread();
         });
 
-        // Use 'message' event (incoming only) instead of 'message_create' (all messages)
-        // to prevent processing our own outgoing messages and avoid duplicate replies
-        this.client.on('message', async (msg) => {
-            try { await this._handleMessage(msg); }
+        // Use 'message_create' event for maximum compatibility and reliability across WhatsApp Web versions
+        this.client.on('message_create', async (msg) => {
+            try {
+                this.sendLog('[WhatsApp] 📥 استلام حدث رسالة: ' + msg.from + ' (من طرفي: ' + msg.fromMe + ') - النص: "' + (msg.body || '').substring(0, 30) + '..."');
+                await this._handleMessage(msg);
+            }
             catch (e) { this.sendLog('[WhatsApp] ⚠️ خطأ: ' + e.message); }
         });
 
@@ -294,9 +296,7 @@ class WhatsAppBot {
 
         if (msg.from === 'status@broadcast') return;
         if (msg.fromMe) return;
-
-        const chat = await msg.getChat();
-        if (chat.isGroup) return;
+        if (msg.from.endsWith('@g.us')) return; // check group without getChat()
 
         // Per-chat lock: only one reply at a time per conversation
         const chatId = msg.from;
@@ -380,7 +380,6 @@ class WhatsAppBot {
                 try {
                     const media = await msg.downloadMedia();
                     const ownerNumber = '201223877211@c.us';
-                    const chat = await this.client.getChatById(ownerNumber);
 
                     let ownerMsg = '🧾 *إيصال دفع جديد*\n\n';
                     ownerMsg += '👤 الاسم: ' + st.name + '\n';
@@ -388,8 +387,8 @@ class WhatsAppBot {
                     ownerMsg += '🔑 المفتاح: ' + st.key + '\n\n';
                     ownerMsg += '⚡ يرجى التأكد من وصول الدفع وتنشيط المفتاح.';
 
-                    await chat.sendMessage(ownerMsg);
-                    if (media) await chat.sendMessage(media);
+                    await this.client.sendMessage(ownerNumber, ownerMsg);
+                    if (media) await this.client.sendMessage(ownerNumber, media);
 
                     this._chatStates.delete(chatId);
                     await msg.reply('✅ تم استلام إيصال الدفع!\n\nجاري مراجعته وتفعيل المفتاح. سيتم إخطارك فور التنشيط ✨\nشكراً لثقتك بنا! 🙏');
@@ -415,17 +414,15 @@ class WhatsAppBot {
         throw new Error('createKey function not set');
     }
 
-    // ─── Install Guide (Text + download screenshot) ────────────
     async _sendInstallGuide(msg) {
         try {
-            const chat = await msg.getChat();
-            await chat.sendMessage(INSTALL_GUIDE_TEXT);
+            await this.client.sendMessage(msg.from, INSTALL_GUIDE_TEXT);
             this.sendLog('[WhatsApp] 📋 تم إرسال دليل التثبيت');
 
             // Send download guide screenshot if exists
             if (fs.existsSync(DOWNLOAD_GUIDE_IMG)) {
                 const media = MessageMedia.fromFilePath(DOWNLOAD_GUIDE_IMG);
-                await chat.sendMessage(media, { caption: '📥 اضغط على الملف المُحدد في الصورة لتحميله' });
+                await this.client.sendMessage(msg.from, media, { caption: '📥 اضغط على الملف المُحدد في الصورة لتحميله' });
                 this.sendLog('[WhatsApp] 📸 تم إرسال صورة دليل التحميل');
             }
         } catch (e) {
@@ -523,7 +520,6 @@ class WhatsAppBot {
 
                 // Send images
                 if (imgMatches.length > 0 && Array.isArray(kb)) {
-                    const chat = await msg.getChat();
                     const sentProducts = new Set();
                     for (const match of imgMatches) {
                         const productIdx = parseInt(match[1], 10) - 1;
@@ -538,7 +534,7 @@ class WhatsAppBot {
                             try {
                                 if (fs.existsSync(imgPath)) {
                                     const media = MessageMedia.fromFilePath(imgPath);
-                                    await chat.sendMessage(media);
+                                    await this.client.sendMessage(msg.from, media);
                                     this.sendLog('[WhatsApp] 🖼️ إرسال صورة: ' + item.title);
                                     await new Promise(r => setTimeout(r, 1000));
                                 }

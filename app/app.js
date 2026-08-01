@@ -497,9 +497,15 @@ var UI = (function () {
           var s = data.status || 'unknown';
           el.textContent = s === 'connected' ? '🟢 Connected' : s === 'connecting' ? '🟡 Connecting' : '🔴 Disconnected';
         }
-        if (data.qr) {
-          var qrC = $('wa-qr-container');
-          if (qrC) qrC.innerHTML = '<img src="' + data.qr + '" style="max-width:260px;border-radius:8px">';
+        var qrC = $('wa-qr-container');
+        if (qrC) {
+          if (data.qr) {
+            qrC.innerHTML = '<img src="' + data.qr + '" style="max-width:260px;border-radius:8px">';
+          } else if (data.status === 'ready' || data.status === 'connected') {
+            qrC.innerHTML = '<div style="color:#2ecc71;font-size:14px;padding:20px;font-weight:600">✅ متصل بالواتساب وجاهز للعمل</div>';
+          } else {
+            qrC.innerHTML = '<div style="color:var(--text3);font-size:12px">اضغط Connect ثم امسح الكود</div>';
+          }
         }
         // Logs
         if (data.logs && data.logs.length) {
