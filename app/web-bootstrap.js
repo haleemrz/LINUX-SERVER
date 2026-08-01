@@ -466,13 +466,21 @@ if (typeof window.Haleem === 'undefined') {
 
       // ─── WhatsApp Bot ───
       waStatus: function () {
-        return makeFetchRequest('GET', '/wa-status');
+        return makeFetchRequest('GET', '/wa-status').then(function(res) {
+          if (res && res.status === 'ready') {
+            res.status = 'connected';
+          }
+          return res;
+        });
       },
       waStart: function () {
         return makeFetchRequest('POST', '/wa-start', {});
       },
       waStop: function () {
         return makeFetchRequest('POST', '/wa-stop', {});
+      },
+      waReset: function () {
+        return makeFetchRequest('POST', '/wa-reset', {});
       },
       waSaveKB: function (text) {
         return makeFetchRequest('POST', '/wa-save-kb', { kb: text });

@@ -552,6 +552,19 @@ var UI = (function () {
     }
   }
 
+  function waReset() {
+    if (!confirm('⚠️ تنبيه: سيقوم هذا الإجراء بفصل جلسة واتساب الحالية ومسح كاش الاتصال. سيتعين عليك مسح الرمز الجديد (QR Code) لتشغيل البوت.\n\nهل تريد الاستمرار؟')) return;
+    toast('⏳ جاري إعادة تهيئة الجلسة...');
+    if (window.Haleem && Haleem.waReset) {
+      Haleem.waReset().then(function() {
+        toast('✅ تم مسح الجلسة بنجاح! امسح الرمز الجديد.');
+        if (_waQrTimer) clearInterval(_waQrTimer);
+        _waQrTimer = setInterval(waRefreshStatus, 3000);
+        setTimeout(waRefreshStatus, 1500);
+      });
+    }
+  }
+
   return {
     switchTab: switchTab, filterList: filterList, refresh: refresh,
     activateKey: activateKey,
@@ -571,6 +584,7 @@ var UI = (function () {
     waConnect: waConnect,
     waDisconnect: waDisconnect,
     waRefreshStatus: waRefreshStatus,
-    waSaveKB: waSaveKB
+    waSaveKB: waSaveKB,
+    waReset: waReset
   };
 })();

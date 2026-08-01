@@ -1165,6 +1165,33 @@ function handleRequest(req, res) {
       }
       return;
     }
+    if (method === 'POST' && url === '/wa-reset') {
+      var err = validateAdminRequest(req, bodyStr);
+      if (err) { sendJSON(res, 401, { error: err }); return; }
+      if (waBot) {
+        waBot.disconnect().then(function() {
+          try {
+            var WA_SESSIONS_DIR = path.join(DATA_DIR, 'wa_sessions');
+            var sessionDir = path.join(WA_SESSIONS_DIR, 'session-haleem_server');
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+              log('WA_LOG', { msg: '[WhatsApp] 🧹 Session cache cleared successfully.' });
+            }
+          } catch(e) {
+            log('WA_LOG', { msg: '[WhatsApp] ⚠️ Failed to delete session: ' + e.message });
+          }
+          waQrCode = null;
+          return waBot.connect();
+        }).then(function(r) {
+          sendJSON(res, 200, { success: true });
+        }).catch(function(e) {
+          sendJSON(res, 500, { error: e.message });
+        });
+      } else {
+        sendJSON(res, 500, { error: 'WhatsApp Bot not initialized' });
+      }
+      return;
+    }
     if (method === 'GET' && url === '/wa-get-kb') {
       var err = validateAdminRequest(req, bodyStr);
       if (err) { sendJSON(res, 401, { error: err }); return; }
