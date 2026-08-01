@@ -346,10 +346,26 @@ function validateClientRequest(body) {
 // ════════════════════════════════════════════════════════
 // LOGGING
 // ════════════════════════════════════════════════════════
+var serverLogs = [];
+
 function log(event, data) {
   var entry = { ts: new Date().toISOString(), event: event, data: data || {} };
   console.log('[HALEEM] ' + JSON.stringify(entry));
+
+  try {
+    var logMsg = event + ': ' + JSON.stringify(data);
+    var timeStr = new Date().toLocaleTimeString();
+    serverLogs.push({ time: timeStr, msg: logMsg });
+    if (serverLogs.length > 300) serverLogs.shift();
+  } catch (e) {}
+
   if (process.send) process.send({ type: 'log', payload: entry });
+}
+
+function handleLogs(req, res, ip, bodyStr) {
+  var err = validateAdminRequest(req, bodyStr);
+  if (err) { sendJSON(res, 401, { error: err }); return; }
+  sendJSON(res, 200, { logs: serverLogs });
 }
 
 function getClientIP(req) {
@@ -702,7 +718,7 @@ function handleAffiliateList(req, res, ip, bodyStr) {
       created_at: a.created_at
     };
   });
-  sendJSON(res, 200, { affiliates: list });
+  sendJSON(res, 200, { affiliates: list, referrals: _affiliateData.referrals || [] });
 }
 
 function handleAffiliateEnable(req, res, ip, bodyStr) {
@@ -948,6 +964,23 @@ function handleMyAffiliate(req, res, ip, bodyStr) {
   });
 }
 
+function serveStatic(res, filePath, contentType) {
+  fs.readFile(filePath, function(err, content) {
+    if (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Error loading file: ' + err.message);
+    } else {
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY'
+      });
+      res.end(content);
+    }
+  });
+}
+
 // ════════════════════════════════════════════════════════
 // ROUTER
 // ════════════════════════════════════════════════════════
@@ -977,6 +1010,22 @@ function handleRequest(req, res) {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Timestamp, X-Nonce, X-Signature, X-Device-Id');
 
+  // PUBLIC UN-AUTHENTICATED STATIC FILES
+  if (method === 'GET') {
+    if (url === '/' || url === '/index.html') {
+      return serveStatic(res, path.join(__dirname, '..', 'app', 'index.html'), 'text/html; charset=utf-8');
+    }
+    if (url === '/app.js') {
+      return serveStatic(res, path.join(__dirname, '..', 'app', 'app.js'), 'application/javascript; charset=utf-8');
+    }
+    if (url === '/style.css') {
+      return serveStatic(res, path.join(__dirname, '..', 'app', 'style.css'), 'text/css; charset=utf-8');
+    }
+    if (url === '/web-bootstrap.js') {
+      return serveStatic(res, path.join(__dirname, '..', 'app', 'web-bootstrap.js'), 'application/javascript; charset=utf-8');
+    }
+  }
+
   // PUBLIC UN-AUTHENTICATED PING ENDPOINT
   if (method === 'GET' && url === '/ping') {
     sendJSON(res, 200, { status: 'haleem-server' });
@@ -1005,6 +1054,7 @@ function handleRequest(req, res) {
 
   readBody(req, function (bodyStr) {
     // STRICT ROUTING
+    if (method === 'GET' && url === '/logs') return handleLogs(req, res, ip, bodyStr);
     if (method === 'GET' && url === '/status') return handleStatus(req, res, ip, bodyStr);
     if (method === 'GET' && url === '/clients') return handleClients(req, res, ip, bodyStr);
     if (method === 'GET' && url === '/requests') return handleRequests(req, res, ip, bodyStr);

@@ -33,6 +33,5 @@ contextBridge.exposeInMainWorld('Haleem', {
   waStatus: function () { return ipcRenderer.invoke('wa-status'); },
   waStart: function () { return ipcRenderer.invoke('wa-start'); },
   waStop: function () { return ipcRenderer.invoke('wa-stop'); },
-  waSaveKB: function (text) { return ipcRenderer.invoke('wa-save-kb', text); },
-  waGetKB: function () { return ipcRenderer.invoke('wa-get-kb'); }
+  waSaveKB: function (text) { return ipcRenderer.invoke('wa-save-kb', text); }
 });

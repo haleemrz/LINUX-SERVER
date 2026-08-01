@@ -618,14 +618,6 @@ ipcMain.handle('wa-save-kb', function (e, text) {
   });
 });
 
-ipcMain.handle('wa-get-kb', function () {
-  return new Promise(function (resolve) {
-    makeAdminRequest('GET', '/wa-get-kb', null, function (err, data) {
-      resolve(err ? { error: err } : data);
-    });
-  });
-});
-
 // ─── Window ────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
