@@ -36,7 +36,7 @@ var UI = (function () {
     if (btns[idx]) btns[idx].classList.add('active');
     if (name === 'licenses') refresh();
     if (name === 'affiliate') loadAffiliates();
-    if (name === 'whatsapp') waRefreshStatus();
+    if (name === 'whatsapp') { waRefreshStatus(); waLoadKB(); }
   }
 
   // ─── Format ───────────────────────────────────────
@@ -552,6 +552,19 @@ var UI = (function () {
     }
   }
 
+  function waLoadKB() {
+    if (window.Haleem && Haleem.waGetKB) {
+      Haleem.waGetKB().then(function(data) {
+        if (!data || data.error) return;
+        var kb = $('wa-kb');
+        if (kb) {
+          // Format KB data as readable JSON
+          kb.value = JSON.stringify(data, null, 2);
+        }
+      });
+    }
+  }
+
   function waReset() {
     if (!confirm('⚠️ تنبيه: سيقوم هذا الإجراء بفصل جلسة واتساب الحالية ومسح كاش الاتصال. سيتعين عليك مسح الرمز الجديد (QR Code) لتشغيل البوت.\n\nهل تريد الاستمرار؟')) return;
     toast('⏳ جاري إعادة تهيئة الجلسة...');
@@ -585,6 +598,7 @@ var UI = (function () {
     waDisconnect: waDisconnect,
     waRefreshStatus: waRefreshStatus,
     waSaveKB: waSaveKB,
-    waReset: waReset
+    waReset: waReset,
+    waLoadKB: waLoadKB
   };
 })();

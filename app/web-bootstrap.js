@@ -482,6 +482,9 @@ if (typeof window.Haleem === 'undefined') {
       waReset: function () {
         return makeFetchRequest('POST', '/wa-reset', {});
       },
+      waGetKB: function () {
+        return makeFetchRequest('GET', '/wa-get-kb');
+      },
       waSaveKB: function (text) {
         return makeFetchRequest('POST', '/wa-save-kb', { kb: text });
       }

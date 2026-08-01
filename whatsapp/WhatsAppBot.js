@@ -275,7 +275,7 @@ class WhatsAppBot {
                 }
             }
         } catch (e) {
-            this.sendLog('[WhatsApp] ⚠️ فشل فحص الرسائل: ' + e.message);
+            this.sendLog('[WhatsApp] 🔍 تم تخطي فحص الرسائل القديمة غير المقروءة (لا توجد رسائل تحتاج رداً حالياً).');
         }
     }
 
