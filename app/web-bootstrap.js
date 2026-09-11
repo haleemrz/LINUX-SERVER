@@ -248,7 +248,8 @@ if (typeof window.Haleem === 'undefined') {
         'Authorization': 'Bearer ' + token,
         'x-timestamp': ts,
         'x-nonce': nonce,
-        'x-signature': sig
+        'x-signature': sig,
+        'x-device-id': 'web-dashboard'
       };
 
       return fetch(urlPath, {

@@ -137,12 +137,39 @@ class WhatsAppBot {
         this.sendLog('[WhatsApp] 📱 جاري تهيئة واتساب...');
         this._updateStatus('initializing');
 
+        // Auto-detect Chrome / Chromium executable on Linux / Windows
+        let chromePath = null;
+        const candidates = [
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium'
+        ];
+        for (const c of candidates) {
+            if (fs.existsSync(c)) { chromePath = c; break; }
+        }
+        if (!chromePath) {
+            const cacheDir = path.join(os.homedir(), '.cache', 'puppeteer', 'chrome');
+            if (fs.existsSync(cacheDir)) {
+                const prefix = process.platform === 'win32' ? 'win64-' : process.platform === 'darwin' ? 'mac' : 'linux-';
+                const versions = fs.readdirSync(cacheDir).filter(d => d.startsWith(prefix)).sort();
+                for (const v of versions) {
+                    const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
+                    const subDir = process.platform === 'win32' ? 'chrome-win64' : process.platform === 'darwin' ? 'chrome-mac-x64' : 'chrome-linux64';
+                    const cand = path.join(cacheDir, v, subDir, exeName);
+                    if (fs.existsSync(cand)) { chromePath = cand; break; }
+                }
+            }
+        }
+        if (chromePath) this.sendLog('[WhatsApp] 🌐 Chrome: ' + chromePath);
+
         this.client = new Client({
             authStrategy: new LocalAuth({ clientId: 'haleem_server', dataPath: WA_SESSIONS_DIR }),
             puppeteer: { 
                 headless: true, 
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                protocolTimeout: 180000 // 3 minutes timeout for CPU-only / slow servers
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+                protocolTimeout: 180000,
+                executablePath: chromePath || undefined
             }
         });
 

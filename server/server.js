@@ -20,7 +20,7 @@ var DATA_DIR = process.env.HALEEM_DATA || path.join(os.homedir(), '.haleem-serve
 var RATE_LIMIT_WINDOW = 60000;
 var RATE_LIMIT_MAX = 30;
 var NONCE_TTL = 120000; // 2 min
-var TIMESTAMP_TOLERANCE = 60000; // 60s
+var TIMESTAMP_TOLERANCE = 300000; // 5 min (prevents phone/browser clock drift rejection)
 var MAX_BODY = 1048576; // 1MB (to support KB saving)
 
 // ════════════════════════════════════════════════════════
@@ -326,7 +326,10 @@ function validateAdminRequest(req, body) {
 
   if (_pairedDevice) {
     var deviceFp = req.headers['x-device-id'];
-    if (deviceFp !== _pairedDevice.fingerprint) return 'Unpaired device';
+    // Allow master web dashboard and pair/unpair commands with valid admin token
+    if (deviceFp !== 'web-dashboard' && urlPath !== '/unpair-device' && urlPath !== '/pair-device') {
+      if (deviceFp !== _pairedDevice.fingerprint) return 'Unpaired device';
+    }
   }
 
   return null;
@@ -1087,13 +1090,13 @@ function handleRequest(req, res) {
       if (!body.key) { sendJSON(res, 400, { error: 'Missing key' }); return; }
 
       var lic = _licenses.find(function (l) { return l.key === body.key; });
-      if (!lic) { sendJSON(res, 404, { error: 'Key not found' }); return; }
+      if (!lic) { sendJSON(res, 200, { status: 'error', error: 'Key not found' }); return; }
       if (lic.status === 'revoked') { sendJSON(res, 200, { status: 'revoked' }); return; }
 
       // Bind device if not bound
       if (body.deviceId) {
         if (lic.device_id && lic.device_id !== body.deviceId) {
-          sendJSON(res, 403, { error: 'License bound to another device' });
+          sendJSON(res, 200, { status: 'error', error: 'License bound to another device' });
           return;
         }
         lic.device_id = body.deviceId;
