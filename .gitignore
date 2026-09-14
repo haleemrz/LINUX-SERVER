@@ -1,6 +1,8 @@
+# Sensitive credentials and logs
+*.env
+.env*
+server.env
+.secrets*
+credentials.json
 node_modules/
-.wwebjs_cache/
-.wwebjs_auth/
-package-lock.json
 *.log
-backup/

@@ -42,6 +42,8 @@ var _adminToken = '';
 var _pairedDevice = null;
 var _licenses = [];
 var _affiliateData = { affiliates: [], referrals: [] };
+var PaymentService = require('./payment-service');
+var paymentService = null;
 var _nonces = new Map(); // nonce -> expiry timestamp
 var _rateLimits = new Map(); // ip -> { count, resetAt }
 var _startTime = Date.now();
@@ -967,6 +969,69 @@ function handleMyAffiliate(req, res, ip, bodyStr) {
   });
 }
 
+// ════════════════════════════════════════════════════════
+// XPAY PAYMENT HANDLERS
+// ════════════════════════════════════════════════════════
+function handleAffiliateValidate(req, res, ip, bodyStr) {
+  if (!paymentService) { sendJSON(res, 503, { error: 'Payment service not ready' }); return; }
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  if (!body.affiliateCode) { sendJSON(res, 400, { valid: false, error: 'كود الإحالة مطلوب' }); return; }
+  var result = paymentService.validateAffiliate(body.affiliateCode, body.product, body.clientKey);
+  if (result.valid) {
+    var currency = (body.currency || 'EGP').toUpperCase();
+    var discount = currency === 'USD' ? 5 : 250;
+    var finalPrice = currency === 'USD' ? 20 : 750;
+    sendJSON(res, 200, {
+      valid: true,
+      affiliateCode: result.affiliate.affiliate_code,
+      discount: discount,
+      currency: currency,
+      finalPrice: finalPrice
+    });
+  } else {
+    sendJSON(res, 400, { valid: false, error: result.error });
+  }
+}
+
+function handlePaymentCreate(req, res, ip, bodyStr) {
+  if (!paymentService) { sendJSON(res, 503, { error: 'Payment service not ready' }); return; }
+  var body;
+  try { body = JSON.parse(bodyStr); } catch (e) { sendJSON(res, 400, { error: 'Invalid JSON' }); return; }
+  paymentService.createPaymentSession(body, function (err, result) {
+    if (err) {
+      sendJSON(res, 400, { success: false, error: err.message });
+    } else {
+      sendJSON(res, 200, result);
+    }
+  });
+}
+
+function handlePaymentWebhook(req, res, ip, bodyStr) {
+  if (!paymentService) { sendJSON(res, 503, { error: 'Payment service not ready' }); return; }
+  var signatureHeader = req.headers['xpay-signature'];
+  try {
+    var result = paymentService.processWebhookEvent(bodyStr, signatureHeader);
+    sendJSON(res, 200, { success: true, received: true });
+  } catch (err) {
+    log('WEBHOOK_VERIFICATION_FAILED', { error: err.message, ip: ip });
+    sendJSON(res, 400, { error: err.message });
+  }
+}
+
+function handlePaymentStatus(req, res, ip, bodyStr) {
+  if (!paymentService) { sendJSON(res, 503, { error: 'Payment service not ready' }); return; }
+  var orderId = req.url.split('/api/payments/status/')[1];
+  if (!orderId && req.method === 'POST') {
+    try { var b = JSON.parse(bodyStr); orderId = b.orderId; } catch(e) {}
+  }
+  if (!orderId) { sendJSON(res, 400, { error: 'Missing orderId' }); return; }
+  orderId = orderId.split('?')[0];
+  var status = paymentService.getOrderStatus(orderId);
+  if (!status) { sendJSON(res, 404, { error: 'Order not found' }); return; }
+  sendJSON(res, 200, status);
+}
+
 function serveStatic(res, filePath, contentType) {
   fs.readFile(filePath, function(err, content) {
     if (err) {
@@ -1003,7 +1068,7 @@ function handleRequest(req, res) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Timestamp, X-Nonce, X-Signature, X-Device-Id, Bypass-Tunnel-Reminder, ngrok-skip-browser-warning',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Timestamp, X-Nonce, X-Signature, X-Device-Id, XPay-Signature, Bypass-Tunnel-Reminder, ngrok-skip-browser-warning',
       'Access-Control-Max-Age': '86400'
     });
     res.end();
@@ -1011,7 +1076,7 @@ function handleRequest(req, res) {
   }
 
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Timestamp, X-Nonce, X-Signature, X-Device-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Timestamp, X-Nonce, X-Signature, X-Device-Id, XPay-Signature');
 
   // PUBLIC UN-AUTHENTICATED STATIC FILES
   if (method === 'GET') {
@@ -1229,6 +1294,12 @@ function handleRequest(req, res) {
     if (method === 'POST' && url === '/api/submit-referral') return handleSubmitReferral(req, res, ip, bodyStr);
     if (method === 'GET' && url.indexOf('/api/my-affiliate') === 0) return handleMyAffiliate(req, res, ip, bodyStr);
 
+    // ═══ XPAY PAYMENT API (PUBLIC / WEBHOOK) ══════════════
+    if (method === 'POST' && url === '/api/affiliate/validate') return handleAffiliateValidate(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/payments/create') return handlePaymentCreate(req, res, ip, bodyStr);
+    if (method === 'POST' && url === '/api/payments/webhook') return handlePaymentWebhook(req, res, ip, bodyStr);
+    if ((method === 'GET' || method === 'POST') && url.indexOf('/api/payments/status') === 0) return handlePaymentStatus(req, res, ip, bodyStr);
+
     sendJSON(res, 403, { error: 'Forbidden' });
   });
 }
@@ -1242,6 +1313,18 @@ function start(sslCert, sslKey) {
   loadConfig();
   loadLicenses();
   loadAffiliates();
+
+  paymentService = new PaymentService({
+    dataDir: DATA_DIR,
+    storageKey: _storageKey,
+    encryptFn: encrypt,
+    decryptFn: decrypt,
+    createLicenseKeyFn: createLicenseKey,
+    affiliateDataRef: function () { return _affiliateData; },
+    licensesRef: function () { return _licenses; },
+    saveAffiliatesFn: saveAffiliates,
+    logFn: log
+  });
 
   var httpPort = PORT + 1; // HTTP on 9848
 

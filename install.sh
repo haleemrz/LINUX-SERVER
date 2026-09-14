@@ -54,6 +54,7 @@ Type=simple
 User=$ACTUAL_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=HALEEM_PORT=9847 HALEEM_BIND=0.0.0.0 HALEEM_DATA=$ACTUAL_HOME/.haleem-server
+EnvironmentFile=-$ACTUAL_HOME/.haleem-server/server.env
 ExecStart=/usr/bin/node $INSTALL_DIR/server/server.js
 Restart=always
 RestartSec=5
