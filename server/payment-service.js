@@ -221,6 +221,7 @@ PaymentService.prototype.createPaymentSession = function (options, callback) {
   var returnUrl = process.env.XPAY_RETURN_URL || 'https://haleem.app/payment-success?order_id={CHECKOUT_SESSION_ID}';
 
   var payload = {
+    currency: currency,
     mode: 'payment',
     uiMode: 'hosted',
     lineItems: [
