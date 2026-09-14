@@ -1120,6 +1120,28 @@ function handleRequest(req, res) {
     return;
   }
 
+  // PUBLIC PAYMENT SUCCESS PAGE (Redirect from XPay)
+  if (method === 'GET' && url.indexOf('/payment-success') === 0) {
+    var orderId = url.split('order_id=')[1];
+    if (orderId) orderId = decodeURIComponent(orderId.split('&')[0]);
+    var orderInfo = paymentService ? paymentService.getOrderStatus(orderId) : null;
+    var htmlSuccess = '<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تم الدفع بنجاح — HALEEM</title>'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<style>body{background:#0d1117;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box}'
+      + '.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:100%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.4)}'
+      + 'h1{color:#10b981;font-size:22px;margin-bottom:12px}'
+      + 'p{color:#8b949e;font-size:14px;line-height:1.6;margin-bottom:20px}'
+      + '.key-box{background:#0d1117;border:1px dashed #e2b340;border-radius:8px;padding:12px;font-family:monospace;font-size:16px;color:#FFD700;letter-spacing:2px;margin-bottom:20px;user-select:all}'
+      + '</style></head><body><div class="card">'
+      + '<h1>🎉 تم الدفع وتأكيد الطلب بنجاح!</h1>'
+      + '<p>شكراً لاشتراكك في <b>HALEEM-ULTRA</b>. تم تفعيل الترخيص على حسابك بنجاح.</p>'
+      + (orderInfo && orderInfo.licenseKey ? '<p style="margin-bottom:8px;color:#ccc;">مفتاح الترخيص الخاص بك:</p><div class="key-box">' + orderInfo.licenseKey + '</div><p style="font-size:12px;color:#aaa">يمكنك العودة إلى Premiere Pro وسيتم تفعيل البلجن تلقائياً.</p>' : '<p style="color:#aaa">يمكنك الآن العودة إلى Premiere Pro وسيتم التفعيل التلقائي فورياً.</p>')
+      + '</div></body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(htmlSuccess);
+    return;
+  }
+
   readBody(req, function (bodyStr) {
     // STRICT ROUTING
     if (method === 'GET' && url === '/logs') return handleLogs(req, res, ip, bodyStr);
